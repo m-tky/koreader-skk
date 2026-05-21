@@ -17,6 +17,7 @@ local InfoMessage  = require("ui/widget/infomessage")
 local UIManager    = require("ui/uimanager")
 local lfs          = require("libs/libkoreader-lfs")
 local logger       = require("logger")
+local _            = require("gettext")
 
 local SQ3 = require("lua-ljsqlite3/init")
 local md5 = require("ffi/md5")
