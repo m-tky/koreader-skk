@@ -15,7 +15,7 @@ local logger = require("logger")
 
 local M = {}
 
-M.PAGE_SIZE = 7
+M.PAGE_SIZE = 9
 
 local _dict       = nil   -- merged table: reading → { candidate, ... }
 local _extra_paths = {}   -- user-added dictionary paths (persisted to settings)

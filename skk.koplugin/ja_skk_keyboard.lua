@@ -119,7 +119,7 @@ S.mode     = S.mode     or "kana"
 S.ib       = S.ib       or nil
 S.select   = S.select   or false   -- true while in SELECT mode
 
-local CANDS_PER_PAGE = 9   -- number keys 1-9
+local CANDS_PER_PAGE = Dict and Dict.PAGE_SIZE or 9
 
 -- ----------------------------------------------------------------
 -- Keyboard rebuild (mode changes only)

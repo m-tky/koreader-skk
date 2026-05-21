@@ -11,7 +11,7 @@
 --   Space (▽)     Look up candidates (▼ mode)
 --   Space/n (▼)   Next candidate
 --   p (▼)         Previous candidate
---   1-7 (▼)       Select candidate directly
+--   1-9 (▼)       Select candidate directly
 --   Enter         Commit
 --   Backspace     Delete / cancel conversion
 --   x (▼)         Cancel candidate selection
@@ -161,7 +161,7 @@ function SKK:addToMainMenu(menu_items)
                             "Enter     Commit\n"..
                             "Backspace Delete / cancel\n"..
                             "x         Cancel candidate selection\n"..
-                            "1-7       Select candidate by number\n"..
+                            "1-9       Select candidate by number\n"..
                             "n / p     Next / previous candidate"
                         ),
                     })
