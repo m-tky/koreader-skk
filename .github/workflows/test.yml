@@ -1,0 +1,25 @@
+name: Test and lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - name: Run luacheck
+        run: nix develop --command luacheck skk.koplugin/*.lua tests/*.lua
+
+      - name: Run unit tests
+        run: nix develop --command lua tests/test_romaji.lua

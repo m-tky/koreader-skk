@@ -27,7 +27,6 @@ local InfoMessage = require("ui/widget/infomessage")
 local KeyValuePage = require("ui/widget/keyvaluepage")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
-local datetime = require("datetime")
 local _ = require("gettext")
 
 -- Plugin works on all devices:
@@ -43,6 +42,7 @@ local GITHUB_REPO    = "m-tky/koreader-skk"
 local PLUGIN_FILES   = {
     "_meta.lua", "main.lua", "skk_dictionary.lua",
     "skk_inputtext.lua", "skk_romaji.lua", "ja_skk_keyboard.lua",
+    "SKK-JISYO.utf8",   -- dictionary; triggers auto-rebuild of SQLite DB after download
 }
 
 local SKK = WidgetContainer:extend{
@@ -196,7 +196,6 @@ end
 -- ---- Virtual keyboard (touch) UI ------------------------------
 
 function SKK:_showVKBDMenu()
-    local VirtualKeyboard = require("ui/widget/virtualkeyboard")
     local current_layout = G_reader_settings:readSetting("keyboard_layout") or "en"
     local is_skk = (current_layout == "js")
 

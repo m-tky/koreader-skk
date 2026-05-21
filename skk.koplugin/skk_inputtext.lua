@@ -18,7 +18,6 @@ local InputText = require("ui/widget/inputtext")
 local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
-local logger = require("logger")
 local util = require("util")
 local _ = require("gettext")
 

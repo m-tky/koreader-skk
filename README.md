@@ -16,12 +16,14 @@ Works on **all KOReader platforms**:
 ## Features
 
 - Romaji → hiragana → kanji conversion in SKK style
-- Bundled dictionary (`SKK-JISYO.L` converted to UTF-8, ~5.9 MB)
+- Bundled dictionary (`SKK-JISYO.L` converted to UTF-8, ~5.9 MB) — loaded instantly via SQLite
+- User dictionary: register new words, view usage history, delete entries, export
 - Add extra dictionaries from settings (EUC-JP files auto-converted with iconv)
-- Touch-friendly virtual keyboard with Japanese punctuation row
+- Touch-friendly virtual keyboard with number row and Japanese punctuation
 - Candidate cycling with wrap-around; direct selection by number keys (1–9)
 - Hiragana / Katakana / ASCII mode switching
-- Zero core KOReader file modifications — install as a drop-in plugin
+- In-app update check (Menu → SKK → Check for updates)
+- Zero core KOReader file modifications — drop-in plugin
 
 ---
 
@@ -35,6 +37,10 @@ Works on **all KOReader platforms**:
 
 The plugin registers the SKK keyboard layout automatically on first load, so the
 🌐 menu entry appears without restarting KOReader.
+
+> **First run**: the bundled dictionary is converted to a SQLite database on first
+> use. This takes a few seconds and shows a "変換中…" progress message. Subsequent
+> starts are instant.
 
 ---
 
@@ -53,7 +59,7 @@ is automatically shown so you can see the current mode.
 | `Space` (in ▽) | Look up candidates → ▼ mode |
 | `Space` / `n` (in ▼) | Next candidate (wraps around) |
 | `p` (in ▼) | Previous candidate |
-| `1`–`7` (in ▼) | Select candidate by number |
+| `1`–`9` (in ▼) | Select candidate by number |
 | `Enter` | Commit current composition |
 | `Backspace` | Delete character / cancel conversion |
 | `x` (in ▼) | Cancel candidate selection |
@@ -70,11 +76,13 @@ The SKK keyboard has 5 rows. Row 1 adapts to the current state:
 - **Normal mode** — mode indicator (あ / ア / A) + Japanese punctuation
 - **SELECT mode** — number keys 1–9 for direct candidate selection
 
-Row 5 (bottom) includes cursor-left / cursor-right keys and the Enter key.
+### Layer layout
 
-### Mode key (あ / ア / A key, bottom row and row 1)
-
-Tap the mode key to cycle: **あ** (hiragana) → **ア** (katakana) → **A** (ASCII)
+| Key | Normal (no modifier) | ⇧ (Shift) | ⌥ (Symbol) | ⇧+⌥ |
+|---|---|---|---|---|
+| Q row | q … p | Q … P | 1 … 0 | ! ？ … 〇 |
+| A row | a … : | A … : | @ … 。 | ＠ … ： |
+| Z row | z … , | Z … , | - … , | ー … 、 |
 
 ### Converting to kanji
 
@@ -82,28 +90,49 @@ Tap the mode key to cycle: **あ** (hiragana) → **ア** (katakana) → **A** (
 2. Type the reading in romaji.
 3. Tap **Space** — the first candidate appears as inline preedit:
    `▼漢字 [2:幹事 3:監事…]`
-4. Continue tapping **Space** to cycle, or tap a **number key** to select
-   directly.
+4. Continue tapping **Space** to cycle, or tap a **number key** to select directly.
 5. Tap **Enter** to commit, or **✕** (or Backspace) to cancel.
+
+If no candidates are found, a registration dialog appears so you can add the word
+to your user dictionary.
 
 ---
 
 ## Dictionaries
 
 The bundled `SKK-JISYO.utf8` is derived from
-[SKK-JISYO.L](https://github.com/skk-dev/dict) (GPL-2.0+).
+[SKK-JISYO.L](https://github.com/skk-dev/dict) (GPL-2.0+) and is automatically
+kept up to date by CI (weekly sync from upstream).
 
-To add extra dictionaries:
+### Extra dictionaries
 
-1. **Menu → Tools → SKK Japanese Input → Dictionaries → Add dictionary…**
-2. Enter the full path to a UTF-8 or EUC-JP SKK dictionary file.  
-   EUC-JP files are auto-converted with `iconv` when available
-   (Linux/macOS desktop; **not** available on Kindle).
+**Menu → Tools → SKK Japanese Input → Dictionaries → Add dictionary…**
 
-Recommended user dictionary locations:
+Enter the full path to a UTF-8 or EUC-JP SKK dictionary file.
+EUC-JP files are auto-converted with `iconv` when available (Linux/macOS desktop;
+**not** available on Kindle).
 
-- `/mnt/us/koreader/cache/skk/` (Kindle)
-- `<koreader_dir>/cache/skk/` (other devices)
+### User dictionary
+
+Words registered during conversion are stored in a SQLite user dictionary:
+
+**Menu → Tools → SKK Japanese Input → User dictionary**
+
+- View all registered words with usage counts and last-used date
+- Delete individual entries
+- Export to `.utf8` format for backup or transfer
+
+---
+
+## Updating
+
+**Menu → Tools → SKK Japanese Input → Check for updates**
+
+Checks GitHub for a new release and downloads all plugin files (including the
+updated dictionary) over WiFi. A restart prompt appears on completion.
+
+The dictionary is also updated automatically via CI every week; users who run
+"Check for updates" will always get the latest `SKK-JISYO.utf8`.
 
 ---
 
@@ -126,20 +155,7 @@ Double a consonant before a vowel for sokuon: `kk` → っk (e.g. `kka` → っ�
 
 ---
 
-## Building from source
-
-This plugin requires no build step — it is pure Lua.  
-The bundled dictionary is already in UTF-8 and is loaded at runtime.
-
-To regenerate `SKK-JISYO.utf8` from the upstream EUC-JP source:
-
-```bash
-iconv -f euc-jp -t utf-8 SKK-JISYO.L > SKK-JISYO.utf8
-```
-
----
-
 ## License
 
-- Plugin code: MIT License  
+- Plugin code: GPL-2.0-or-later
 - Bundled dictionary (`SKK-JISYO.utf8`): GPL-2.0-or-later (from [skk-dev/dict](https://github.com/skk-dev/dict))

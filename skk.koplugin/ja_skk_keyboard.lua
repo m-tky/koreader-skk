@@ -13,15 +13,7 @@ Modes (あ/A key bottom row):
   A  – ASCII pass-through
 ]]
 
-local Blitbuffer      = require("ffi/blitbuffer")
-local Device          = require("device")
-local Font            = require("ui/font")
-local FrameContainer  = require("ui/widget/container/framecontainer")
-local Geom            = require("ui/geometry")
-local HorizontalGroup = require("ui/widget/horizontalgroup")
-local Size            = require("ui/size")
-local TextWidget      = require("ui/widget/textwidget")
-local UIManager       = require("ui/uimanager")
+local UIManager = require("ui/uimanager")
 local logger          = require("logger")
 local util            = require("util")
 local _               = require("gettext")
