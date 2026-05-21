@@ -241,6 +241,10 @@ local function wrapInputBox(inputbox)
         if cand_bar then
             UIManager:close(cand_bar, "ui")
             cand_bar = nil
+            -- The bar occupies a gap between the keyboard and the text area that
+            -- no other widget covers.  Force all remaining widgets to repaint so
+            -- the bar pixels are properly erased.
+            UIManager:setDirty("all", "ui")
         end
     end
 
