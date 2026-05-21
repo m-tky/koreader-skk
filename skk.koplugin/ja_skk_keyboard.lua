@@ -112,6 +112,7 @@ S.page     = S.page     or 1
 S.mode     = S.mode     or "kana"
 S.ib       = S.ib       or nil
 S.select   = S.select   or false   -- true while in SELECT mode
+S.bar      = S.bar      or nil     -- SKKCandidateBar widget (survives rebuildKeyboard)
 
 local CANDS_PER_PAGE = Dict and Dict.PAGE_SIZE or 9
 
@@ -215,36 +216,33 @@ local function wrapInputBox(inputbox)
     end
 
     -- Floating candidate bar (shown above the virtual keyboard in SELECT mode).
-    local cand_bar = nil
+    -- S.bar is used instead of a wrapInputBox-local so it survives the
+    -- unwrap+rewrap cycle that rebuildKeyboard() triggers via init().
 
     local function showCandBar(cands, cand_idx, page)
         local page_start = (page - 1) * CANDS_PER_PAGE + 1
-        if not cand_bar then
-            cand_bar = SKKCandidateBar:new{
+        if not S.bar then
+            S.bar = SKKCandidateBar:new{
                 candidates  = cands,
                 current_idx = cand_idx,
                 page_start  = page_start,
             }
             -- Position just above the virtual keyboard.
-            local Screen   = Device.screen
-            local kbd_h    = (S.ib and S.ib.keyboard and S.ib.keyboard.dimen)
-                             and S.ib.keyboard.dimen.h or 0
-            local bar_h    = cand_bar:getSize().h
-            local y        = math.max(0, Screen:getHeight() - kbd_h - bar_h)
-            cand_bar:showAt(y)
+            local Screen = Device.screen
+            local kbd_h  = (S.ib and S.ib.keyboard and S.ib.keyboard.dimen)
+                           and S.ib.keyboard.dimen.h or 0
+            local bar_h  = S.bar:getSize().h
+            local y      = math.max(0, Screen:getHeight() - kbd_h - bar_h)
+            S.bar:showAt(y)
         else
-            cand_bar:update(cands, cand_idx, page_start)
+            S.bar:update(cands, cand_idx, page_start)
         end
     end
 
     local function hideCandBar()
-        if cand_bar then
-            UIManager:close(cand_bar, "ui")
-            cand_bar = nil
-            -- The bar occupies a gap between the keyboard and the text area that
-            -- no other widget covers.  Force all remaining widgets to repaint so
-            -- the bar pixels are properly erased.
-            UIManager:setDirty("all", "ui")
+        if S.bar then
+            UIManager:close(S.bar, "ui")
+            S.bar = nil
         end
     end
 
@@ -561,9 +559,7 @@ local function wrapInputBox(inputbox)
             cancelAll(ib)
             if out~="" then ib.addChars:raw_method_call(out) end
         end
-        -- Always close the bar on any navigation or keyboard-close event,
-        -- even when there is no pending SKK state.
-        hideCandBar()
+        hideCandBar()  -- close bar on any navigation / keyboard-close event
     end
 
     -- ---- Install wrappers --------------------------------------
@@ -584,7 +580,6 @@ local function wrapInputBox(inputbox)
         if inputbox._skk_vkbd_wrapped then
             for _, w in ipairs(wrappers) do w:revert() end
             inputbox._skk_vkbd_wrapped = nil
-            hideCandBar()
         end
     end
 end
