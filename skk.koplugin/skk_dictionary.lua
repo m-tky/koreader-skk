@@ -59,7 +59,15 @@ local _iconv_ok      = false
 local function iconvAvailable()
     if _iconv_checked then return _iconv_ok end
     _iconv_checked = true
-    -- Quick probe: iconv --version; produces a line on success, nothing on failure.
+    -- Check common binary locations first (no process spawn needed).
+    -- On Kindle/Kobo iconv doesn't exist, so this returns quickly.
+    for _, p in ipairs({"/usr/bin/iconv", "/usr/local/bin/iconv", "/bin/iconv"}) do
+        if lfs.attributes(p, "mode") == "file" then
+            _iconv_ok = true
+            return true
+        end
+    end
+    -- Fallback for PATH-only installs (e.g. Homebrew on macOS).
     local fh = io.popen("iconv --version 2>/dev/null")
     if fh then
         local line = fh:read("*l")
