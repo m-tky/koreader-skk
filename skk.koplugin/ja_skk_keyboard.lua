@@ -226,6 +226,12 @@ local function wrapInputBox(inputbox)
                 candidates  = cands,
                 current_idx = cand_idx,
                 page_start  = page_start,
+                on_select   = function(abs_idx)
+                    local ib = S.ib
+                    if not (ib and ib._skk_cands and ib._skk_cands[abs_idx]) then return end
+                    ib._skk_cand_idx = abs_idx
+                    commitText(ib, ib._skk_cands[abs_idx])
+                end,
             }
             -- Position just above the virtual keyboard.
             local Screen = Device.screen
@@ -248,7 +254,6 @@ local function wrapInputBox(inputbox)
 
     local function enterSelectMode(ib)
         S.select = true
-        rebuildKeyboard()  -- show number keys in row 1
         showCandBar(ib._skk_cands, ib._skk_cand_idx, S.page)
     end
 
