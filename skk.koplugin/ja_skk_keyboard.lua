@@ -616,7 +616,7 @@ q → toggle hiragana/katakana; l → ASCII mode
         },
         -- Row 5
         {
-            {label="⌥", bold=true},
+            {label="⌥", bold=true, width=1.5},
             {label="🌐"},
             {SKK_MODE,SKK_MODE,SKK_MODE,SKK_MODE,
              label=S.mode=="kana" and "あ" or S.mode=="katakana" and "ア" or "A",
@@ -625,7 +625,7 @@ q → toggle hiragana/katakana; l → ASCII mode
             {".",",","、","。"},
             {label="←"},
             {label="→"},
-            {label="\226\174\160", "\n","\n","\n","\n", bold=true},
+            {label="\226\174\160", "\n","\n","\n","\n", bold=true, width=1.5},
         },
     },
 }
