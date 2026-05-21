@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   update:
@@ -45,9 +44,8 @@ jobs:
       - name: Check for changes
         id: diff
         run: |
-          # Strip the EUC-JP encoding declaration from the header comment
-          # (iconv replaces it with UTF-8, so the first line always changes).
-          # Compare everything except that line.
+          # Strip the EUC-JP encoding declaration (first line always changes
+          # after iconv); compare only the dictionary content.
           tail -n +2 skk.koplugin/SKK-JISYO.utf8     > /tmp/old.txt
           tail -n +2 skk.koplugin/SKK-JISYO.utf8.new > /tmp/new.txt
 
@@ -56,7 +54,6 @@ jobs:
             rm skk.koplugin/SKK-JISYO.utf8.new
           else
             echo "changed=true" >> $GITHUB_OUTPUT
-            # Count added/removed entries for the PR description
             ADDED=$(diff /tmp/old.txt /tmp/new.txt | grep -c '^>' || true)
             REMOVED=$(diff /tmp/old.txt /tmp/new.txt | grep -c '^<' || true)
             echo "added=$ADDED"     >> $GITHUB_OUTPUT
@@ -72,28 +69,16 @@ jobs:
           sed -i "s/version  = \"$CURRENT\"/version  = \"$NEW\"/" skk.koplugin/_meta.lua
           echo "Bumped $CURRENT → $NEW"
 
-      - name: Create pull request
+      - name: Commit and push directly to main
         if: steps.diff.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          branch: auto/update-dict-${{ steps.upstream.outputs.date }}
-          commit-message: |
-            chore: update SKK-JISYO.utf8 from upstream (${{ steps.upstream.outputs.date }})
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          NEW=$(grep -oP 'version\s*=\s*"\K[^"]+' skk.koplugin/_meta.lua)
+          git add skk.koplugin/SKK-JISYO.utf8 skk.koplugin/_meta.lua
+          git commit -m "chore: update dictionary + bump to v${NEW} (${{ steps.upstream.outputs.date }})
 
-            Source: skk-dev/dict@${{ steps.upstream.outputs.sha }}
-          title: "chore: update SKK-JISYO.utf8 (${{ steps.upstream.outputs.date }})"
-          body: |
-            Automated dictionary update from [skk-dev/dict](https://github.com/skk-dev/dict).
-
-            | | Count |
-            |---|---|
-            | Added entries   | ${{ steps.diff.outputs.added }} |
-            | Removed entries | ${{ steps.diff.outputs.removed }} |
-
-            Upstream commit: skk-dev/dict@${{ steps.upstream.outputs.sha }}
-
-            ---
-            *This PR was created automatically by the [update-dictionary](${{ github.server_url }}/${{ github.repository }}/actions/workflows/update-dictionary.yml) workflow.*
-          labels: dependencies
-          delete-branch: true
+          Source: skk-dev/dict@${{ steps.upstream.outputs.sha }}
+          Entries added: ${{ steps.diff.outputs.added }}
+          Entries removed: ${{ steps.diff.outputs.removed }}"
+          git push origin main
