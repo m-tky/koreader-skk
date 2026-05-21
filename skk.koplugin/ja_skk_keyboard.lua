@@ -220,20 +220,24 @@ local function wrapInputBox(inputbox)
         end
     end
 
-    -- Build inline hint: "▼漢字 [2:幹事 3:監事...]"
+    -- Build inline hint: "▼漢字 [2:幹事 3:監事…]"
+    local HINT_MAX_ALTS = 4  -- keep hint short enough to avoid line wrapping
     local function candidateHint(cands, cand_idx, page)
         local sel = cands[cand_idx] or ""
         local start = (page-1)*CANDS_PER_PAGE + 1
+        local page_end = math.min(start+CANDS_PER_PAGE-1, #cands)
         local parts = {"▼"..sel.." ["}
         local shown = 0
-        for i = start, math.min(start+CANDS_PER_PAGE-1, #cands) do
+        local truncated = false
+        for i = start, page_end do
             if i ~= cand_idx then
+                if shown >= HINT_MAX_ALTS then truncated = true; break end
                 local n = i - start + 1
                 table.insert(parts, tostring(n)..":"..cands[i].." ")
                 shown = shown + 1
             end
         end
-        if #cands > start+CANDS_PER_PAGE-1 then table.insert(parts, "…") end
+        if truncated or #cands > page_end then table.insert(parts, "…") end
         table.insert(parts, "]")
         return table.concat(parts)
     end
@@ -408,6 +412,7 @@ local function wrapInputBox(inputbox)
                 ib._skk_romaji_buf=""; ib._skk_reading=""; ib._skk_state="direct"
                 commitText(ib, kata); return
             elseif is_upper then
+                if ib.keyboard and ib.keyboard.shiftmode then ib.keyboard:setLayer("Shift") end
                 local reading = ib._skk_reading..flushRomaji(ib._skk_romaji_buf)
                 ib._skk_romaji_buf = char:lower()
                 if reading ~= "" then
@@ -426,7 +431,11 @@ local function wrapInputBox(inputbox)
         end
 
         -- DIRECT state
-        if is_upper then startConvMode(ib, char:lower()); return end
+        if is_upper then
+            if ib.keyboard and ib.keyboard.shiftmode then ib.keyboard:setLayer("Shift") end
+            startConvMode(ib, char:lower())
+            return
+        end
         if char==" " then
             local flushed=flushRomaji(ib._skk_romaji_buf)
             ib._skk_romaji_buf=""; delHint(ib)
@@ -552,25 +561,25 @@ q → toggle hiragana/katakana; l → ASCII mode
 
     keys = {
         genFirstRow(),
-        -- Row 2 (Layer1=Shift/Upper, Layer2=Normal/Lower, Layer3=Sym, Layer4=Sym+Shift)
+        -- Row 2 (Layer1=⇧, Layer2=Normal, Layer3=⇧+⌥, Layer4=⌥)
         {
-            {"Q","q","1","!"},{"W","w","2","？"},{"E","e","3","、"},
-            {"R","r","4","。"},{"T","t","5","「"},{"Y","y","6","」"},
-            {"U","u","7","・"},{"I","i","8","…"},{"O","o","9","〜"},{"P","p","0","〇"},
+            {"Q","q","!","1"},{"W","w","？","2"},{"E","e","、","3"},
+            {"R","r","。","4"},{"T","t","「","5"},{"Y","y","」","6"},
+            {"U","u","・","7"},{"I","i","…","8"},{"O","o","〜","9"},{"P","p","〇","0"},
         },
         -- Row 3
         {
-            {"A","a","@","＠"},{"S","s","#","＃"},{"D","d","$","＄"},
-            {"F","f","%","％"},{"G","g","^","＾"},{"H","h","&","＆"},
-            {"J","j","*","＊"},{"K","k","(","（"},{"L","l",")","）"},
-            {".",":" ,"。","："},
+            {"A","a","＠","@"},{"S","s","＃","#"},{"D","d","＄","$"},
+            {"F","f","％","%"},{"G","g","＾","^"},{"H","h","＆","&"},
+            {"J","j","＊","*"},{"K","k","（","("},{"L","l","）",")"},
+            {".",":","：","。"},
         },
         -- Row 4
         {
             {label="⇧", width=1.5},
-            {"Z","z","-","ー"},{"X","x","_","＿"},{"C","c","+","＋"},
-            {"V","v","=","＝"},{"B","b","/","／"},{"N","n","\\","￥"},
-            {"M","m",",","、"},
+            {"Z","z","ー","-"},{"X","x","＿","_"},{"C","c","＋","+"},
+            {"V","v","＝","="},{"B","b","／","/"},{"N","n","￥","\\"},
+            {"M","m","、",","},
             {label="\238\157\173", width=1.5},
         },
         -- Row 5
@@ -581,7 +590,7 @@ q → toggle hiragana/katakana; l → ASCII mode
              label=S.mode=="kana" and "あ" or S.mode=="katakana" and "ア" or "A",
              bold=true},
             {" "," "," "," ", label="_", width=2.0},
-            {".","," ,"。","、"},
+            {".",",","、","。"},
             {label="←"},
             {label="→"},
             {label="\226\174\160", "\n","\n","\n","\n", bold=true},
