@@ -7,6 +7,7 @@ local Blitbuffer     = require("ffi/blitbuffer")
 local Device         = require("device")
 local Font           = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
+local Geom           = require("ui/geometry")
 local GestureRange   = require("ui/gesturerange")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local Size           = require("ui/size")
@@ -90,6 +91,12 @@ end
 
 -- Show at a fixed y position (top-left origin).
 function SKKCandidateBar:showAt(y)
+    -- Set self.dimen with the real screen position BEFORE UIManager:show so
+    -- GestureRange:match() uses the correct y coordinate.  Without this,
+    -- dimen.y defaults to 0 and taps on the bar (at y≈900) never match,
+    -- causing events to fall through to the inputbox instead.
+    local size = self:getSize()
+    self.dimen = Geom:new{ x = 0, y = y, w = size.w, h = size.h }
     UIManager:show(self, "ui", nil, 0, y)
 end
 
