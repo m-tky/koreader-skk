@@ -246,6 +246,11 @@ local function wrapInputBox(inputbox)
     end
 
     local function commitText(ib, text)
+        -- Track usage when committing a dictionary candidate (SELECT state).
+        if ib._skk_state == "select" and ib._skk_reading and ib._skk_reading ~= ""
+                and text and text ~= "" and Dict then
+            Dict.register(ib._skk_reading, text)
+        end
         delHint(ib)
         ib._skk_state      = "direct"
         ib._skk_reading    = ""

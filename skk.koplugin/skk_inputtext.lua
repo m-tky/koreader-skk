@@ -266,6 +266,10 @@ end
 
 function SKKInputText:_commitCandidate()
     local cand = (self._candidates and self._candidates[self._cand_idx]) or ""
+    -- Track usage before clearing reading.
+    if self._reading ~= "" and cand ~= "" then
+        Dict.register(self._reading, cand)
+    end
     self:_closeCandidateBar()
     self._state      = ST_KANA
     self._reading    = ""
