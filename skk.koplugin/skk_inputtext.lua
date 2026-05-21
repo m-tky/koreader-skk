@@ -134,7 +134,9 @@ function SKKInputText:_preeditText()
     elseif self._state == ST_CONV then
         return MARK_CONV .. self._reading .. self._romaji_buf
     elseif self._state == ST_SELECT then
-        return MARK_SELECT .. (self._candidates and self._candidates[self._cand_idx] or "")
+        local sel   = self._candidates and self._candidates[self._cand_idx] or ""
+        local okuri = self._romaji_buf ~= "" and ("*"..self._romaji_buf) or ""
+        return MARK_SELECT .. sel .. okuri
     end
     return ""
 end

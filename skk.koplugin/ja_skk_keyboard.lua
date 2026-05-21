@@ -212,13 +212,15 @@ local function wrapInputBox(inputbox)
         end
     end
 
-    -- Build inline hint: "▼漢字 [2:幹事 3:監事…]"
+    -- Build inline hint: "▼漢字*b [2:幹事 3:監事…]"
+    -- okuri_buf: pending okurigana consonant (e.g. "b"), shown as "*b" after the candidate.
     local HINT_MAX_ALTS = 4  -- keep hint short enough to avoid line wrapping
-    local function candidateHint(cands, cand_idx, page)
+    local function candidateHint(cands, cand_idx, page, okuri_buf)
         local sel = cands[cand_idx] or ""
+        local okuri = (okuri_buf and okuri_buf ~= "") and ("*"..okuri_buf) or ""
         local start = (page-1)*CANDS_PER_PAGE + 1
         local page_end = math.min(start+CANDS_PER_PAGE-1, #cands)
-        local parts = {"▼"..sel.." ["}
+        local parts = {"▼"..sel..okuri.." ["}
         local shown = 0
         local truncated = false
         for i = start, page_end do
@@ -288,7 +290,7 @@ local function wrapInputBox(inputbox)
         elseif state == "select" then
             local cands = ib._skk_cands
             if cands and #cands > 0 then
-                putHint(ib, candidateHint(cands, ib._skk_cand_idx, S.page))
+                putHint(ib, candidateHint(cands, ib._skk_cand_idx, S.page, buf))
             end
         end
     end
