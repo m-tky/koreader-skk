@@ -1,0 +1,91 @@
+name: Update SKK dictionary
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'  # Every Monday 03:00 UTC
+  workflow_dispatch:      # Allow manual trigger
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download upstream SKK-JISYO.L (EUC-JP)
+        run: |
+          curl -fsSL \
+            "https://raw.githubusercontent.com/skk-dev/dict/master/SKK-JISYO.L" \
+            -o SKK-JISYO.L
+
+      - name: Get upstream commit info
+        id: upstream
+        run: |
+          INFO=$(curl -fsSL \
+            "https://api.github.com/repos/skk-dev/dict/commits?path=SKK-JISYO.L&per_page=1" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}")
+          SHA=$(echo "$INFO" | python3 -c \
+            "import sys,json; d=json.load(sys.stdin); print(d[0]['sha'][:8])")
+          DATE=$(echo "$INFO" | python3 -c \
+            "import sys,json; d=json.load(sys.stdin); print(d[0]['commit']['committer']['date'][:10])")
+          echo "sha=$SHA"   >> $GITHUB_OUTPUT
+          echo "date=$DATE" >> $GITHUB_OUTPUT
+
+      - name: Convert EUC-JP → UTF-8
+        run: |
+          iconv -f EUC-JP -t UTF-8 SKK-JISYO.L \
+            > skk.koplugin/SKK-JISYO.utf8.new
+          rm SKK-JISYO.L
+
+      - name: Check for changes
+        id: diff
+        run: |
+          # Strip the EUC-JP encoding declaration from the header comment
+          # (iconv replaces it with UTF-8, so the first line always changes).
+          # Compare everything except that line.
+          tail -n +2 skk.koplugin/SKK-JISYO.utf8     > /tmp/old.txt
+          tail -n +2 skk.koplugin/SKK-JISYO.utf8.new > /tmp/new.txt
+
+          if diff -q /tmp/old.txt /tmp/new.txt > /dev/null 2>&1; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            rm skk.koplugin/SKK-JISYO.utf8.new
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            # Count added/removed entries for the PR description
+            ADDED=$(diff /tmp/old.txt /tmp/new.txt | grep -c '^>' || true)
+            REMOVED=$(diff /tmp/old.txt /tmp/new.txt | grep -c '^<' || true)
+            echo "added=$ADDED"     >> $GITHUB_OUTPUT
+            echo "removed=$REMOVED" >> $GITHUB_OUTPUT
+            mv skk.koplugin/SKK-JISYO.utf8.new skk.koplugin/SKK-JISYO.utf8
+          fi
+
+      - name: Create pull request
+        if: steps.diff.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: auto/update-dict-${{ steps.upstream.outputs.date }}
+          commit-message: |
+            chore: update SKK-JISYO.utf8 from upstream (${{ steps.upstream.outputs.date }})
+
+            Source: skk-dev/dict@${{ steps.upstream.outputs.sha }}
+          title: "chore: update SKK-JISYO.utf8 (${{ steps.upstream.outputs.date }})"
+          body: |
+            Automated dictionary update from [skk-dev/dict](https://github.com/skk-dev/dict).
+
+            | | Count |
+            |---|---|
+            | Added entries   | ${{ steps.diff.outputs.added }} |
+            | Removed entries | ${{ steps.diff.outputs.removed }} |
+
+            Upstream commit: skk-dev/dict@${{ steps.upstream.outputs.sha }}
+
+            ---
+            *This PR was created automatically by the [update-dictionary](${{ github.server_url }}/${{ github.repository }}/actions/workflows/update-dictionary.yml) workflow.*
+          labels: dependencies
+          delete-branch: true
