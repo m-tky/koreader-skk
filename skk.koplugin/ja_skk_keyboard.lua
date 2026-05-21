@@ -239,7 +239,7 @@ local function wrapInputBox(inputbox)
 
     local function hideCandBar()
         if cand_bar then
-            UIManager:close(cand_bar)
+            UIManager:close(cand_bar, "ui")
             cand_bar = nil
         end
     end

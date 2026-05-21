@@ -110,7 +110,7 @@ end
 
 function SKKInputText:_closeCandidateBar()
     if self._bar then
-        UIManager:close(self._bar)
+        UIManager:close(self._bar, "ui")
         self._bar = nil
     end
 end
