@@ -557,6 +557,9 @@ local function wrapInputBox(inputbox)
             cancelAll(ib)
             if out~="" then ib.addChars:raw_method_call(out) end
         end
+        -- Always close the bar on any navigation or keyboard-close event,
+        -- even when there is no pending SKK state.
+        hideCandBar()
     end
 
     -- ---- Install wrappers --------------------------------------
@@ -577,6 +580,7 @@ local function wrapInputBox(inputbox)
         if inputbox._skk_vkbd_wrapped then
             for _, w in ipairs(wrappers) do w:revert() end
             inputbox._skk_vkbd_wrapped = nil
+            hideCandBar()
         end
     end
 end
