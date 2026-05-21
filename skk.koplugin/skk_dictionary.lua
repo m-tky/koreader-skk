@@ -152,7 +152,8 @@ local function parseCandidates(value_str)
 end
 
 -- Merge one UTF-8 dictionary file into `tbl`. Returns entry count added.
-local function mergeFile(path, tbl)
+-- priority=true → prepend entries so they appear before existing candidates.
+local function mergeFile(path, tbl, priority)
     local f = io.open(path, "r")
     if not f then
         logger.warn("SKK: cannot open", path)
@@ -166,8 +167,14 @@ local function mergeFile(path, tbl)
                 local cands = parseCandidates(value)
                 if #cands > 0 then
                     if _dict[reading] then
-                        for _, c in ipairs(cands) do
-                            table.insert(_dict[reading], c)
+                        if priority then
+                            for i = #cands, 1, -1 do
+                                table.insert(_dict[reading], 1, cands[i])
+                            end
+                        else
+                            for _, c in ipairs(cands) do
+                                table.insert(_dict[reading], c)
+                            end
                         end
                     else
                         _dict[reading] = cands
@@ -205,6 +212,13 @@ local function loadDict()
         end
     end
 
+    -- User dictionary loaded last with priority so registered words appear first.
+    local user_file = getUserCacheDir() .. "/user-dict.utf8"
+    if lfs.attributes(user_file, "mode") == "file" then
+        logger.info("SKK: loading user dictionary", user_file)
+        total = total + mergeFile(user_file, _dict, true)
+    end
+
     if total > 0 then
         logger.info(string.format("SKK: loaded %d entries total", total))
     else
@@ -216,6 +230,31 @@ end
 -- ----------------------------------------------------------------
 -- Public API
 -- ----------------------------------------------------------------
+
+-- Register a new word in memory and persist it to the user dictionary file.
+-- The new entry is prepended so it appears as the first candidate.
+function M.register(reading, kanji)
+    if not _dict then _dict = {} end
+    if not _dict[reading] then
+        _dict[reading] = { kanji }
+    else
+        -- Remove duplicate if present, then prepend.
+        for i, c in ipairs(_dict[reading]) do
+            if c == kanji then table.remove(_dict[reading], i); break end
+        end
+        table.insert(_dict[reading], 1, kanji)
+    end
+    local user_dir = getUserCacheDir()
+    lfs.mkdir(user_dir)
+    local user_file = user_dir .. "/user-dict.utf8"
+    local f = io.open(user_file, "a")
+    if f then
+        f:write(reading .. " /" .. kanji .. "/\n")
+        f:close()
+    end
+end
+
+function M.getUserDictFile() return getUserCacheDir() .. "/user-dict.utf8" end
 
 function M.lookup(reading)
     if not _dict then loadDict() end

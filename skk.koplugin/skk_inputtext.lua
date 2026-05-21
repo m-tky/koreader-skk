@@ -219,8 +219,7 @@ function SKKInputText:_triggerConversion()
     self._reading = query
     local cands = Dict.lookup(query)
     if #cands == 0 then
-        -- No candidates: stay in CONV, refresh display
-        self:_refreshPreedit()
+        self:_showRegisterPrompt(query)
         return
     end
     self._candidates = cands
@@ -229,6 +228,41 @@ function SKKInputText:_triggerConversion()
     self._state      = ST_SELECT
     self:_refreshPreedit()
     self:_showCandidateBar()
+end
+
+function SKKInputText:_showRegisterPrompt(reading)
+    -- Reset conversion state before showing the dialog.
+    self._state      = ST_KANA
+    self._reading    = ""
+    self._romaji_buf = ""
+    self:_clearPreedit()
+    local InputDialog = require("ui/widget/inputdialog")
+    local reg_dialog
+    reg_dialog = InputDialog:new{
+        title = _("Register") .. ": " .. reading,
+        description = _("No candidates found. Enter the kanji to register:"),
+        input = "",
+        input_hint = _("kanji"),
+        buttons = {{
+            {
+                text = _("Cancel"),
+                callback = function() UIManager:close(reg_dialog) end,
+            },
+            {
+                text = _("Register"),
+                is_enter_default = true,
+                callback = function()
+                    local kanji = reg_dialog:getInputText()
+                    UIManager:close(reg_dialog)
+                    if kanji and kanji ~= "" then
+                        Dict.register(reading, kanji)
+                        InputText.addChars(self, kanji)
+                    end
+                end,
+            },
+        }},
+    }
+    UIManager:show(reg_dialog)
 end
 
 function SKKInputText:_commitCandidate()

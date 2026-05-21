@@ -307,6 +307,37 @@ local function wrapInputBox(inputbox)
         refreshPreedit(ib)
     end
 
+    local function showRegisterPrompt(ib, reading)
+        cancelAll(ib)
+        local InputDialog = require("ui/widget/inputdialog")
+        local reg_dialog
+        reg_dialog = InputDialog:new{
+            title = _("Register") .. ": " .. reading,
+            description = _("No candidates found. Enter the kanji to register:"),
+            input = "",
+            input_hint = _("kanji"),
+            buttons = {{
+                {
+                    text = _("Cancel"),
+                    callback = function() UIManager:close(reg_dialog) end,
+                },
+                {
+                    text = _("Register"),
+                    is_enter_default = true,
+                    callback = function()
+                        local kanji = reg_dialog:getInputText()
+                        UIManager:close(reg_dialog)
+                        if kanji and kanji ~= "" then
+                            if Dict then Dict.register(reading, kanji) end
+                            ib.addChars:raw_method_call(kanji)
+                        end
+                    end,
+                },
+            }},
+        }
+        UIManager:show(reg_dialog)
+    end
+
     local function triggerConversion(ib)
         local flushed = flushRomaji(ib._skk_romaji_buf)
         ib._skk_romaji_buf = ""
@@ -314,7 +345,7 @@ local function wrapInputBox(inputbox)
         if query == "" then cancelAll(ib); return end
         ib._skk_reading = query
         local cands = Dict and Dict.lookup(query) or {}
-        if #cands == 0 then refreshPreedit(ib); return end
+        if #cands == 0 then showRegisterPrompt(ib, query); return end
         ib._skk_cands    = cands
         ib._skk_cand_idx = 1
         ib._skk_state    = "select"
