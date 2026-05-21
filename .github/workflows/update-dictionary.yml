@@ -64,6 +64,14 @@ jobs:
             mv skk.koplugin/SKK-JISYO.utf8.new skk.koplugin/SKK-JISYO.utf8
           fi
 
+      - name: Bump patch version in _meta.lua
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          CURRENT=$(grep -oP 'version\s*=\s*"\K[^"]+' skk.koplugin/_meta.lua)
+          NEW=$(echo "$CURRENT" | awk -F. '{print $1"."$2"."$3+1}')
+          sed -i "s/version  = \"$CURRENT\"/version  = \"$NEW\"/" skk.koplugin/_meta.lua
+          echo "Bumped $CURRENT → $NEW"
+
       - name: Create pull request
         if: steps.diff.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@v6

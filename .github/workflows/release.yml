@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'skk.koplugin/_meta.lua'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # needed to check existing tags
+
+      - name: Read version from _meta.lua
+        id: meta
+        run: |
+          VERSION=$(grep -oP 'version\s*=\s*"\K[^"]+' skk.koplugin/_meta.lua)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Check if tag already exists
+        id: tag
+        run: |
+          TAG="v${{ steps.meta.outputs.version }}"
+          if git tag --list "$TAG" | grep -q .; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create GitHub Release
+        if: steps.tag.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.meta.outputs.version }}
+          name: v${{ steps.meta.outputs.version }}
+          generate_release_notes: true
+          files: |
+            skk.koplugin/_meta.lua
+            skk.koplugin/main.lua
+            skk.koplugin/skk_dictionary.lua
+            skk.koplugin/skk_inputtext.lua
+            skk.koplugin/skk_romaji.lua
+            skk.koplugin/ja_skk_keyboard.lua
+            skk.koplugin/SKK-JISYO.utf8
