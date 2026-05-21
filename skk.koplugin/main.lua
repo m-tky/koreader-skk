@@ -18,6 +18,7 @@
 
 local Device = require("device")
 local InputDialog = require("ui/widget/inputdialog")
+local NetworkMgr = require("ui/network/manager")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local ButtonDialog = require("ui/widget/buttondialog")
@@ -35,6 +36,14 @@ local _ = require("gettext")
 
 local Dict = require("skk_dictionary")
 local SKKInputText = require("skk_inputtext")
+
+local _meta = require("_meta")
+local PLUGIN_VERSION = _meta.version or "0.0.0"
+local GITHUB_REPO    = "m-tky/koreader-skk"
+local PLUGIN_FILES   = {
+    "_meta.lua", "main.lua", "skk_dictionary.lua",
+    "skk_inputtext.lua", "skk_romaji.lua", "ja_skk_keyboard.lua",
+}
 
 local SKK = WidgetContainer:extend{
     name = "skk",
@@ -154,6 +163,12 @@ function SKK:addToMainMenu(menu_items)
             {
                 text = _("Virtual keyboard (touch devices)"),
                 callback = function() self:_showVKBDMenu() end,
+            },
+            {
+                text = string.format(_("Check for updates  (current: v%s)"), PLUGIN_VERSION),
+                callback = function()
+                    NetworkMgr:runWhenOnline(function() self:_checkForUpdates() end)
+                end,
             },
             {
                 text = _("Key bindings"),
@@ -430,6 +445,148 @@ function SKK:_addDict(path)
         -- result is an error message string
         UIManager:show(InfoMessage:new{
             text = tostring(result),
+        })
+    end
+end
+
+-- ---- Plugin update ---------------------------------------------
+
+-- Simple semver comparison: "0.3.1" > "0.3.0" → true.
+local function isNewer(remote, local_v)
+    local function parts(v)
+        local a, b, c = v:match("^v?(%d+)%.(%d+)%.(%d+)")
+        return tonumber(a) or 0, tonumber(b) or 0, tonumber(c) or 0
+    end
+    local ra, rb, rc = parts(remote)
+    local la, lb, lc = parts(local_v)
+    if ra ~= la then return ra > la end
+    if rb ~= lb then return rb > lb end
+    return rc > lc
+end
+
+-- Fetch a URL and return body string, or nil + error message.
+local function httpGet(url)
+    local http       = require("socket.http")
+    local ltn12      = require("ltn12")
+    local socketutil = require("socketutil")
+    local body = {}
+    socketutil:set_timeout(15)
+    local ok, code = http.request{
+        url     = url,
+        headers = { ["User-Agent"] = "koreader-skk/" .. PLUGIN_VERSION },
+        sink    = ltn12.sink.table(body),
+    }
+    socketutil:reset_timeout()
+    if ok and code == 200 then
+        return table.concat(body)
+    end
+    return nil, string.format("HTTP %s", tostring(code))
+end
+
+function SKK:_checkForUpdates()
+    local checking = InfoMessage:new{ text = _("Checking for updates…") }
+    UIManager:show(checking)
+    UIManager:forceRePaint()
+
+    -- Fetch latest release from GitHub API.
+    local api_url = string.format(
+        "https://api.github.com/repos/%s/releases/latest", GITHUB_REPO)
+    local body, err = httpGet(api_url)
+    UIManager:close(checking)
+
+    if not body then
+        UIManager:show(InfoMessage:new{
+            text = string.format(_("Update check failed:\n%s"), err or "unknown error"),
+        })
+        return
+    end
+
+    local ok, data = pcall(require("json").decode, body)
+    if not ok or type(data) ~= "table" then
+        UIManager:show(InfoMessage:new{
+            text = _("Could not parse update information."),
+        })
+        return
+    end
+
+    local remote_tag = (data.tag_name or ""):gsub("^v", "")
+    local notes      = data.body or ""
+
+    if not isNewer(remote_tag, PLUGIN_VERSION) then
+        UIManager:show(InfoMessage:new{
+            text = string.format(_("You are up to date.\nInstalled: v%s"), PLUGIN_VERSION),
+            timeout = 3,
+        })
+        return
+    end
+
+    -- Truncate release notes for display.
+    local display_notes = #notes > 300
+        and notes:sub(1, 300) .. "\n…"
+        or  notes
+
+    UIManager:show(ConfirmBox:new{
+        text = string.format(
+            _("Update available!\n\nInstalled: v%s\nAvailable: v%s\n\n%s"),
+            PLUGIN_VERSION, remote_tag, display_notes),
+        ok_text     = _("Update"),
+        cancel_text = _("Later"),
+        ok_callback = function()
+            self:_downloadUpdate(remote_tag)
+        end,
+    })
+end
+
+function SKK:_downloadUpdate(tag)
+    local plugin_dir = Dict.getPluginDir()
+    local base_url   = string.format(
+        "https://raw.githubusercontent.com/%s/v%s/skk.koplugin/",
+        GITHUB_REPO, tag)
+
+    local progress = InfoMessage:new{
+        text = string.format(_("Downloading update v%s…"), tag),
+    }
+    UIManager:show(progress)
+    UIManager:forceRePaint()
+
+    local failed = {}
+    for _, fname in ipairs(PLUGIN_FILES) do
+        local content, err = httpGet(base_url .. fname)
+        if content then
+            local dest = plugin_dir .. "/" .. fname
+            -- Write to a temp file first, then rename atomically.
+            local tmp = dest .. ".tmp"
+            local f = io.open(tmp, "w")
+            if f then
+                f:write(content)
+                f:close()
+                os.rename(tmp, dest)
+            else
+                failed[#failed+1] = fname .. " (write error)"
+            end
+        else
+            failed[#failed+1] = fname .. " (" .. (err or "?") .. ")"
+        end
+    end
+
+    UIManager:close(progress)
+
+    if #failed > 0 then
+        UIManager:show(InfoMessage:new{
+            text = string.format(
+                _("Update partially failed.\nCould not download:\n%s"),
+                table.concat(failed, "\n")),
+        })
+    else
+        UIManager:show(ConfirmBox:new{
+            text = string.format(
+                _("Update to v%s complete.\nRestart KOReader to apply."), tag),
+            ok_text     = _("Restart now"),
+            cancel_text = _("Later"),
+            ok_callback = function()
+                local Event = require("ui/event")
+                UIManager:broadcastEvent(Event:new("Restart"))
+            end,
         })
     end
 end
