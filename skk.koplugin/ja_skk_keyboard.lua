@@ -417,7 +417,11 @@ local function wrapInputBox(inputbox)
                 ib._skk_romaji_buf = char:lower()
                 if reading ~= "" then
                     ib._skk_reading = reading
-                    local cands = Dict and (Dict.lookup(reading..char:lower()) or Dict.lookup(reading)) or {}
+                    local cands = {}
+                    if Dict then
+                        cands = Dict.lookup(reading..char:lower())
+                        if #cands == 0 then cands = Dict.lookup(reading) end
+                    end
                     if #cands > 0 then
                         ib._skk_cands=cands; ib._skk_cand_idx=1
                         ib._skk_state="select"; S.cands=cands; S.page=1
