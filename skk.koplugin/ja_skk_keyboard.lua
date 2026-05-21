@@ -202,7 +202,11 @@ local function wrapInputBox(inputbox)
         end
     end
 
-    if Dict then Dict.ensureLoaded() end
+    -- Defer dictionary loading until after the keyboard has rendered.
+    -- Dict.lookup() falls back to lazy loading if the dict isn't ready yet.
+    if Dict and not Dict.isLoaded() then
+        UIManager:nextTick(function() Dict.ensureLoaded() end)
+    end
 
     -- ---- Helpers -----------------------------------------------
 
