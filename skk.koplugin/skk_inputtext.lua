@@ -266,6 +266,7 @@ end
 
 function SKKInputText:_commitCandidate()
     local cand = (self._candidates and self._candidates[self._cand_idx]) or ""
+    local saved_buf = self._romaji_buf  -- preserve okurigana consonant (e.g. "b")
     -- Track usage before clearing reading.
     if self._reading ~= "" and cand ~= "" then
         Dict.register(self._reading, cand)
@@ -276,8 +277,9 @@ function SKKInputText:_commitCandidate()
     self._candidates = nil
     self._cand_idx   = 1
     self._cand_page  = 1
-    self._romaji_buf = ""
+    self._romaji_buf = saved_buf
     self:_commit(cand)
+    if saved_buf ~= "" then self:_setPreedit(saved_buf) end
 end
 
 function SKKInputText:_cancelSelection()

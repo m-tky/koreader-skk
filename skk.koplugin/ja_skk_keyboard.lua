@@ -251,15 +251,20 @@ local function wrapInputBox(inputbox)
                 and text and text ~= "" and Dict then
             Dict.register(ib._skk_reading, text)
         end
+        -- Preserve okurigana consonant (e.g. "b" from TaB): SKK-JISYO.L stores
+        -- okurigana candidates as bare kanji (e.g. /食/), so after committing the
+        -- kanji the user still needs to type the vowel to complete the okurigana.
+        local saved_buf = ib._skk_romaji_buf
         delHint(ib)
         ib._skk_state      = "direct"
         ib._skk_reading    = ""
         ib._skk_cands      = nil
         ib._skk_cand_idx   = 1
-        ib._skk_romaji_buf = ""
+        ib._skk_romaji_buf = saved_buf
         exitSelectMode(ib)
         rebuildKeyboard()  -- restore row 1 to punctuation
         if text and text ~= "" then ib.addChars:raw_method_call(text) end
+        if saved_buf ~= "" then putHint(ib, saved_buf) end
     end
 
     local function cancelAll(ib)
