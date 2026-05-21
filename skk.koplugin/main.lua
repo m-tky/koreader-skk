@@ -21,9 +21,12 @@ local InputDialog = require("ui/widget/inputdialog")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local ButtonDialog = require("ui/widget/buttondialog")
+local ConfirmBox = require("ui/widget/confirmbox")
 local InfoMessage = require("ui/widget/infomessage")
+local KeyValuePage = require("ui/widget/keyvaluepage")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
+local datetime = require("datetime")
 local _ = require("gettext")
 
 -- Plugin works on all devices:
@@ -56,7 +59,7 @@ function SKK:init()
     self._enabled = G_reader_settings:isTrue("skk_enabled")
     if self._enabled then
         self:_activate()
-        UIManager:nextTick(function() Dict.ensureLoaded() end)
+        UIManager:nextTick(function() Dict.ensureDB() end)
     end
 end
 
@@ -128,7 +131,7 @@ function SKK:addToMainMenu(menu_items)
                     G_reader_settings:saveSetting("skk_enabled", self._enabled)
                     if self._enabled then
                         self:_activate()
-                        Dict.ensureLoaded()
+                        Dict.ensureDB()
                         UIManager:show(InfoMessage:new{
                             text = _("SKK enabled.\n"..
                                      "Ctrl+\\ toggles SKK per field.\n"..
@@ -143,6 +146,10 @@ function SKK:addToMainMenu(menu_items)
             {
                 text = _("Dictionaries"),
                 callback = function() self:_showDictMenu() end,
+            },
+            {
+                text = _("User dictionary"),
+                callback = function() self:_showUserDictMenu() end,
             },
             {
                 text = _("Virtual keyboard (touch devices)"),
@@ -294,7 +301,7 @@ function SKK:_showDictMenu()
     else
         for _, d in ipairs(dict_list) do
             local short = d.path:match("[^/]+$") or d.path
-            local loaded = Dict.isLoaded() and "✓ " or "? "
+            local loaded = Dict.isReady() and "✓ " or "? "
             table.insert(lines, loaded .. "[" .. d.label .. "] " .. short)
         end
     end
@@ -345,11 +352,11 @@ function SKK:_showDictMenu()
                 or  _("iconv: NOT available (UTF-8 files only)")
             UIManager:show(InfoMessage:new{
                 text = string.format(_(
-                    "Bundled directory:\n%s\n\n"..
-                    "User directory:\n%s\n\n"..
+                    "Plugin directory:\n%s\n\n"..
+                    "Data directory:\n%s\n\n"..
                     "%s"),
                     Dict.getPluginDir(),
-                    Dict.getUserCacheDir(),
+                    Dict.getDataDir(),
                     iconv_status),
             })
         end,
@@ -372,7 +379,7 @@ function SKK:_showAddDictDialog()
     local hint = string.format(_(
         "Enter the full path to a UTF-8 SKK dictionary file.\n"..
         "Example: %s/my-extra.utf8"),
-        Dict.getUserCacheDir())
+        Dict.getDataDir())
 
     local input_dialog
     input_dialog = InputDialog:new{
@@ -427,6 +434,70 @@ function SKK:_addDict(path)
     end
 end
 
+-- ---- User dictionary management --------------------------------
+
+function SKK:_showUserDictMenu()
+    local entries = Dict.getUserDictEntries()
+
+    if #entries == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("No user dictionary entries yet.\n"..
+                     "Entries are added when you register new words during conversion."),
+            timeout = 3,
+        })
+        return
+    end
+
+    local kv_pairs = {}
+    for _, e in ipairs(entries) do
+        local when = e.last_used
+            and os.date("%Y-%m-%d", e.last_used) or "—"
+        local key   = e.reading .. "  →  " .. e.candidate
+        local value = string.format(_("used %d×  last: %s"), e.use_count, when)
+        local reading   = e.reading    -- capture for callback
+        local candidate = e.candidate
+        kv_pairs[#kv_pairs+1] = {
+            key, value,
+            callback = function()
+                UIManager:show(ConfirmBox:new{
+                    text = string.format(
+                        _("Delete entry?\n%s → %s"), reading, candidate),
+                    ok_text = _("Delete"),
+                    ok_callback = function()
+                        Dict.deleteUserDictEntry(reading, candidate)
+                        UIManager:show(InfoMessage:new{
+                            text = _("Entry deleted."), timeout = 2,
+                        })
+                    end,
+                })
+            end,
+        }
+    end
+
+    local page = KeyValuePage:new{
+        title = _("User Dictionary"),
+        kv_pairs = kv_pairs,
+        callback_return = function() end,
+        -- Export button in title bar left icon
+        title_bar_left_icon = "appbar.save",
+        title_bar_left_icon_tap_callback = function()
+            local export_path = Dict.getDataDir() .. "/user-dict-export.utf8"
+            local ok, err = Dict.exportUserDict(export_path)
+            if ok then
+                UIManager:show(InfoMessage:new{
+                    text = string.format(_("Exported to:\n%s"), export_path),
+                    timeout = 3,
+                })
+            else
+                UIManager:show(InfoMessage:new{
+                    text = string.format(_("Export failed: %s"), tostring(err)),
+                })
+            end
+        end,
+    }
+    UIManager:show(page)
+end
+
 -- ---- Plugin lifecycle ------------------------------------------
 
 function SKK:_activate()
@@ -446,6 +517,7 @@ end
 function SKK:onCloseWidget()
     self:_deactivate()
     self:_unregisterKeyboardLayout()
+    Dict.close()
 end
 
 return SKK

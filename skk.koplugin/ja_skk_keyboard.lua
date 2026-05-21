@@ -202,7 +202,7 @@ local function wrapInputBox(inputbox)
         end
     end
 
-    if Dict then Dict.ensureLoaded() end
+    if Dict then Dict.ensureDB() end
 
     -- ---- Helpers -----------------------------------------------
 
