@@ -357,6 +357,9 @@ function SKKInputText:_processChar(ch)
                 self:_commitCandidate()
                 return true
             end
+            -- Unknown char: commit current candidate then reprocess in new state
+            self:_commitCandidate()
+            return self:_processChar(ch)
         end
     end
 
