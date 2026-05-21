@@ -10,19 +10,15 @@
 --   CONV     – ▽ reading accumulation; Space → SELECTING
 --   SELECT   – ▼ candidate cycling; Enter → commit
 
-local Blitbuffer = require("ffi/blitbuffer")
 local Device = require("device")
-local Font = require("ui/font")
-local FrameContainer = require("ui/widget/container/framecontainer")
 local InputText = require("ui/widget/inputtext")
-local Size = require("ui/size")
-local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local util = require("util")
 local _ = require("gettext")
 
 local Romaji = require("skk_romaji")
 local Dict = require("skk_dictionary")
+local CandidateBar = require("skk_candidate_bar")
 
 local ST_KANA     = "kana"
 local ST_KATAKANA = "katakana"
@@ -31,59 +27,6 @@ local ST_SELECT   = "select"
 
 local MARK_CONV   = "▽"
 local MARK_SELECT = "▼"
-
--- ----------------------------------------------------------------
--- Candidate bar: a toast widget pinned to the bottom of the screen.
--- toast=true → event propagation passes through it unchanged.
--- ----------------------------------------------------------------
-local CandidateBar = FrameContainer:extend{
-    toast       = true,
-    bordersize  = Size.border.window,
-    background  = Blitbuffer.COLOR_WHITE,
-    candidates  = nil,
-    page_start  = 1,
-    current_idx = 1,
-}
-
-local BAR_FACE = Font:getFace("cfont", 18)
-
-function CandidateBar:init()
-    self:_rebuild()
-end
-
-function CandidateBar:_rebuild()
-    local Screen = Device.screen
-    local w = Screen:getWidth()
-    local ps = Dict.PAGE_SIZE
-    local parts = {}
-    for i = self.page_start, math.min(self.page_start + ps - 1, #self.candidates) do
-        local n = i - self.page_start + 1
-        local sel = (i == self.current_idx)
-        local label = (sel and "【" or " ") ..
-                      tostring(n) .. ":" ..
-                      self.candidates[i] ..
-                      (sel and "】" or " ") .. " "
-        table.insert(parts, label)
-    end
-    if #self.candidates > self.page_start + ps - 1 then
-        table.insert(parts, " ▶")
-    end
-    local tw = TextWidget:new{
-        text      = table.concat(parts),
-        face      = BAR_FACE,
-        max_width = w - 2 * Size.border.window,
-    }
-    self[1] = tw
-    -- self.dimen is computed by FrameContainer:getSize() at paint time
-end
-
-function CandidateBar:update(candidates, current_idx, page_start)
-    self.candidates  = candidates
-    self.current_idx = current_idx or 1
-    self.page_start  = page_start  or 1
-    self:_rebuild()
-    UIManager:setDirty(self, "ui")
-end
 
 -- ----------------------------------------------------------------
 -- SKKInputText

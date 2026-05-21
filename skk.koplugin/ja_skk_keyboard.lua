@@ -3,8 +3,8 @@ SKK (Simple Kana to Kanji) keyboard layout for KOReader's VirtualKeyboard.
 
 Candidate selection:
   Row 1 in SELECT mode → shows "1"–"9" number keys for direct selection.
-  The selected candidate and alternatives are shown as inline preedit:
-    ▼漢字 [2:幹事 3:監事 4:感じ…]
+  A floating candidate bar appears above the keyboard showing all candidates.
+  Inline preedit shows only the current candidate: ▼漢字 (or ▼食*b for okurigana).
   Space cycles candidates; Enter commits; x cancels.
 
 Modes (あ/A key bottom row):
@@ -13,7 +13,9 @@ Modes (あ/A key bottom row):
   A  – ASCII pass-through
 ]]
 
+local Device    = require("device")
 local UIManager = require("ui/uimanager")
+local SKKCandidateBar = require("skk_candidate_bar")
 local logger          = require("logger")
 local util            = require("util")
 local _               = require("gettext")
@@ -212,39 +214,47 @@ local function wrapInputBox(inputbox)
         end
     end
 
-    -- Build inline hint: "▼漢字*b [2:幹事 3:監事…]"
-    -- okuri_buf: pending okurigana consonant (e.g. "b"), shown as "*b" after the candidate.
-    local HINT_MAX_ALTS = 4  -- keep hint short enough to avoid line wrapping
-    local function candidateHint(cands, cand_idx, page, okuri_buf)
-        local sel = cands[cand_idx] or ""
-        local okuri = (okuri_buf and okuri_buf ~= "") and ("*"..okuri_buf) or ""
-        local start = (page-1)*CANDS_PER_PAGE + 1
-        local page_end = math.min(start+CANDS_PER_PAGE-1, #cands)
-        local parts = {"▼"..sel..okuri.." ["}
-        local shown = 0
-        local truncated = false
-        for i = start, page_end do
-            if i ~= cand_idx then
-                if shown >= HINT_MAX_ALTS then truncated = true; break end
-                local n = i - start + 1
-                table.insert(parts, tostring(n)..":"..cands[i].." ")
-                shown = shown + 1
-            end
+    -- Floating candidate bar (shown above the virtual keyboard in SELECT mode).
+    local cand_bar = nil
+
+    local function showCandBar(cands, cand_idx, page)
+        local page_start = (page - 1) * CANDS_PER_PAGE + 1
+        if not cand_bar then
+            cand_bar = SKKCandidateBar:new{
+                candidates  = cands,
+                current_idx = cand_idx,
+                page_start  = page_start,
+            }
+            -- Position just above the virtual keyboard.
+            local Screen   = Device.screen
+            local kbd_h    = (S.ib and S.ib.keyboard and S.ib.keyboard.dimen)
+                             and S.ib.keyboard.dimen.h or 0
+            local bar_h    = cand_bar:getSize().h
+            local y        = math.max(0, Screen:getHeight() - kbd_h - bar_h)
+            cand_bar:showAt(y)
+        else
+            cand_bar:update(cands, cand_idx, page_start)
         end
-        if truncated or #cands > page_end then table.insert(parts, "…") end
-        table.insert(parts, "]")
-        return table.concat(parts)
+    end
+
+    local function hideCandBar()
+        if cand_bar then
+            UIManager:close(cand_bar)
+            cand_bar = nil
+        end
     end
 
     local function enterSelectMode(ib)
         S.select = true
         rebuildKeyboard()  -- show number keys in row 1
+        showCandBar(ib._skk_cands, ib._skk_cand_idx, S.page)
     end
 
     local function exitSelectMode(ib)
         S.select = false
         S.cands  = {}
         S.page   = 1
+        hideCandBar()
     end
 
     local function commitText(ib, text)
@@ -290,7 +300,9 @@ local function wrapInputBox(inputbox)
         elseif state == "select" then
             local cands = ib._skk_cands
             if cands and #cands > 0 then
-                putHint(ib, candidateHint(cands, ib._skk_cand_idx, S.page, buf))
+                local sel   = cands[ib._skk_cand_idx] or ""
+                local okuri = buf ~= "" and ("*"..buf) or ""
+                putHint(ib, "▼"..sel..okuri)
             end
         end
     end
@@ -413,6 +425,7 @@ local function wrapInputBox(inputbox)
                 local pg = math.ceil(ib._skk_cand_idx / CANDS_PER_PAGE)
                 if pg ~= S.page then S.page = pg end
                 refreshPreedit(ib)
+                showCandBar(cands, ib._skk_cand_idx, S.page)
                 return
             elseif char == "x" then
                 cancelAll(ib); return
