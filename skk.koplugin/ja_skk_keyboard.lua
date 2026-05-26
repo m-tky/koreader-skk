@@ -21,81 +21,15 @@ local util            = require("util")
 local _               = require("gettext")
 
 -- ----------------------------------------------------------------
--- Load SKK engine modules from the plugin (optional)
+-- SKK engine modules — shipped together with this keyboard layout in
+-- skk.koplugin, so no fallback is needed.
 -- ----------------------------------------------------------------
-local Romaji, Dict
-do
-    local ok, r = pcall(require, "skk_romaji")
-    if ok then Romaji = r else
-        logger.warn("ja_skk_keyboard: skk_romaji not found – install skk.koplugin")
-    end
-    local ok2, d = pcall(require, "skk_dictionary")
-    if ok2 then Dict = d end
-end
+local Romaji = require("skk_romaji")
+local Dict   = require("skk_dictionary")
 
--- ----------------------------------------------------------------
--- Minimal inline romaji (fallback)
--- ----------------------------------------------------------------
-local KANA_INLINE = {
-    a="あ",i="い",u="う",e="え",o="お",
-    ka="か",ki="き",ku="く",ke="け",ko="こ",
-    ga="が",gi="ぎ",gu="ぐ",ge="げ",go="ご",
-    sa="さ",si="し",su="す",se="せ",so="そ",shi="し",
-    sha="しゃ",shu="しゅ",sho="しょ",
-    za="ざ",zi="じ",zu="ず",ze="ぜ",zo="ぞ",ji="じ",
-    ja="じゃ",ju="じゅ",jo="じょ",
-    ta="た",ti="ち",tu="つ",te="て",to="と",
-    chi="ち",tsu="つ",cha="ちゃ",chu="ちゅ",cho="ちょ",
-    da="だ",di="ぢ",du="づ",de="で",["do"]="ど",
-    na="な",ni="に",nu="ぬ",ne="ね",no="の",
-    nya="にゃ",nyu="にゅ",nyo="にょ",nn="ん",
-    ha="は",hi="ひ",hu="ふ",he="へ",ho="ほ",fu="ふ",
-    hya="ひゃ",hyu="ひゅ",hyo="ひょ",
-    ba="ば",bi="び",bu="ぶ",be="べ",bo="ぼ",
-    pa="ぱ",pi="ぴ",pu="ぷ",pe="ぺ",po="ぽ",
-    ma="ま",mi="み",mu="む",me="め",mo="も",
-    mya="みゃ",myu="みゅ",myo="みょ",
-    ya="や",yu="ゆ",yo="よ",
-    ra="ら",ri="り",ru="る",re="れ",ro="ろ",
-    rya="りゃ",ryu="りゅ",ryo="りょ",
-    wa="わ",wi="ゐ",we="ゑ",wo="を",
-    xa="ぁ",xi="ぃ",xu="ぅ",xe="ぇ",xo="ぉ",xtu="っ",xtsu="っ",xn="ん",
-    ["z,"]="、",["z."]="。",["zh"]="←",["zj"]="↓",
-    ["zk"]="↑",["zl"]="→",["z/"]="・",["z-"]="〜",
-    ["z["]="「",["z]"]="」",
-}
-local PREFIXES_INLINE, DOUBLERS = {}, {b=1,c=1,d=1,f=1,g=1,h=1,j=1,k=1,m=1,p=1,r=1,s=1,t=1,v=1,w=1,z=1}
-for seq in pairs(KANA_INLINE) do
-    for l = 1, #seq-1 do PREFIXES_INLINE[seq:sub(1,l)] = true end
-    PREFIXES_INLINE[seq] = true
-end
-
-local function processChar_inline(buf, ch)
-    local try = buf..ch
-    if KANA_INLINE[try] then return KANA_INLINE[try],"" end
-    if PREFIXES_INLINE[try] then return nil,try end
-    local V={a=1,i=1,u=1,e=1,o=1}
-    if buf=="n" and not V[ch] and ch~="y" and ch~="n" then
-        local c,b=processChar_inline("",ch); return "ん"..(c or ""),b end
-    if #buf==1 and DOUBLERS[buf] and ch==buf then return "っ",ch end
-    if #buf==2 then
-        local b1,b2=buf:sub(1,1),buf:sub(2,2)
-        if b1==b2 and DOUBLERS[b1] then local c,nb=processChar_inline(b1,ch); return "っ"..(c or ""),nb end
-    end
-    if #buf>0 then local c,b=processChar_inline("",ch); return buf..(c or ""),b end
-    return nil,ch
-end
-local function flush_inline(buf)
-    if buf=="" then return "" end; if buf=="n" then return "ん" end
-    return KANA_INLINE[buf] or buf
-end
-
-local function processChar(buf,ch)
-    if Romaji then return Romaji.processChar(buf,ch) end; return processChar_inline(buf,ch) end
-local function flushRomaji(buf)
-    if Romaji then return Romaji.flush(buf) end; return flush_inline(buf) end
-local function toKatakana(str)
-    if Romaji then return Romaji.toKatakana(str) end; return str end
+local processChar  = Romaji.processChar
+local flushRomaji  = Romaji.flush
+local toKatakana   = Romaji.toKatakana
 
 -- ----------------------------------------------------------------
 -- Special key token
@@ -114,7 +48,7 @@ S.ib       = S.ib       or nil
 S.select   = S.select   or false   -- true while in SELECT mode
 S.bar      = S.bar      or nil     -- SKKCandidateBar widget (survives rebuildKeyboard)
 
-local CANDS_PER_PAGE = Dict and Dict.PAGE_SIZE or 9
+local CANDS_PER_PAGE = Dict.PAGE_SIZE
 
 -- ----------------------------------------------------------------
 -- Keyboard rebuild (mode changes only)
@@ -197,7 +131,7 @@ local function wrapInputBox(inputbox)
         end
     end
 
-    if Dict then Dict.ensureDB() end
+    Dict.ensureDB()
 
     -- ---- Helpers -----------------------------------------------
 
@@ -351,7 +285,7 @@ local function wrapInputBox(inputbox)
                         local kanji = reg_dialog:getInputText()
                         UIManager:close(reg_dialog)
                         if kanji and kanji ~= "" then
-                            if Dict then Dict.register(reading, kanji) end
+                            Dict.register(reading, kanji)
                             ib.addChars:raw_method_call(kanji)
                         end
                     end,
@@ -367,7 +301,17 @@ local function wrapInputBox(inputbox)
         local query = ib._skk_reading..flushed
         if query == "" then cancelAll(ib); return end
         ib._skk_reading = query
-        local cands = Dict and Dict.lookup(query) or {}
+        if not Dict.isReady() then
+            UIManager:show(require("ui/widget/notification"):new{
+                text = Dict.isBuilding()
+                    and _("SKK: dictionary still preparing…")
+                    or  _("SKK: dictionary unavailable."),
+                timeout = 2,
+            })
+            refreshPreedit(ib)
+            return
+        end
+        local cands = Dict.lookup(query)
         if #cands == 0 then showRegisterPrompt(ib, query); return end
         ib._skk_cands    = cands
         ib._skk_cand_idx = 1
@@ -472,11 +416,8 @@ local function wrapInputBox(inputbox)
                 ib._skk_romaji_buf = char:lower()
                 if reading ~= "" then
                     ib._skk_reading = reading
-                    local cands = {}
-                    if Dict then
-                        cands = Dict.lookup(reading..char:lower())
-                        if #cands == 0 then cands = Dict.lookup(reading) end
-                    end
+                    local cands = Dict.lookup(reading..char:lower())
+                    if #cands == 0 then cands = Dict.lookup(reading) end
                     if #cands > 0 then
                         ib._skk_cands=cands; ib._skk_cand_idx=1
                         ib._skk_state="select"; S.cands=cands; S.page=1

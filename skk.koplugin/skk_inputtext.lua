@@ -13,6 +13,7 @@
 local Device = require("device")
 local InputText = require("ui/widget/inputtext")
 local UIManager = require("ui/uimanager")
+local time = require("ui/time")
 local util = require("util")
 local _ = require("gettext")
 
@@ -39,27 +40,70 @@ local SKKInputText = InputText:extend{
     _candidates          = nil,
     _cand_idx            = 1,
     _cand_page           = 1,
-    _preedit_len         = 0,
+    -- Preedit is tracked as (start index in charlist, exact chars inserted).
+    -- This survives cursor movement and lets us bail out cleanly if the user
+    -- edits inside the preedit region (rather than deleting the wrong chars).
+    _preedit_start       = nil,
+    _preedit_chars       = nil,
     _bar                 = nil,
-    _skip_next_textinput = false,  -- guard for SDL shift+letter double-fire
+    -- Set to the time.now() value at which a Shift+letter onKeyPress fired.
+    -- The matching SDL onTextInput should arrive within a few ms; older values
+    -- are stale and ignored so we never swallow an unrelated future char.
+    _skip_textinput_at   = nil,
 }
+
+local SKIP_TEXTINPUT_WINDOW = time.ms(50)
+
+local function preeditLen(self)
+    return self._preedit_chars and #self._preedit_chars or 0
+end
 
 ---------------------------------------------------------------------------
 -- Preedit helpers
 ---------------------------------------------------------------------------
 
 function SKKInputText:_clearPreedit()
-    for _ = 1, self._preedit_len do
-        InputText.delChar(self)
+    local pe = self._preedit_chars
+    if not pe or #pe == 0 then
+        self._preedit_chars = nil
+        self._preedit_start = nil
+        return
     end
-    self._preedit_len = 0
+    local start = self._preedit_start or 0
+    -- Verify the slice in charlist still matches what we inserted. If the
+    -- user moved the cursor and typed inside the preedit, the slice no
+    -- longer matches — orphan our tracking rather than delete the wrong chars.
+    if start < 1 or start + #pe - 1 > #self.charlist then
+        self._preedit_chars = nil
+        self._preedit_start = nil
+        return
+    end
+    for i = 1, #pe do
+        if self.charlist[start + i - 1] ~= pe[i] then
+            self._preedit_chars = nil
+            self._preedit_start = nil
+            return
+        end
+    end
+    for _ = 1, #pe do
+        table.remove(self.charlist, start)
+    end
+    if self.charpos >= start + #pe then
+        self.charpos = self.charpos - #pe
+    elseif self.charpos > start then
+        self.charpos = start
+    end
+    self._preedit_chars = nil
+    self._preedit_start = nil
+    self.is_text_edited = true
+    self:initTextBox(nil, false)
 end
 
 function SKKInputText:_setPreedit(text)
     self:_clearPreedit()
     if text and text ~= "" then
-        local chars = util.splitToChars(text)
-        self._preedit_len = #chars
+        self._preedit_start = self.charpos
+        self._preedit_chars = util.splitToChars(text)
         InputText.addChars(self, text)
     end
 end
@@ -95,14 +139,22 @@ end
 function SKKInputText:_showCandidateBar()
     local Screen = Device.screen
     if not self._bar then
+        local this = self
         self._bar = CandidateBar:new{
             candidates  = self._candidates,
             current_idx = self._cand_idx,
             page_start  = self._cand_page,
+            on_select   = function(abs_idx)
+                if this._candidates and this._candidates[abs_idx] then
+                    this._cand_idx = abs_idx
+                    this:_commitCandidate()
+                end
+            end,
         }
-        -- Compute height via FrameContainer:getSize() after init
+        -- showAt() sets self.dimen before showing so taps inside the bar
+        -- actually match its GestureRange (dimen.y defaults to 0 otherwise).
         local bar_h = self._bar:getSize().h
-        UIManager:show(self._bar, "ui", nil, 0, Screen:getHeight() - bar_h)
+        self._bar:showAt(Screen:getHeight() - bar_h)
     else
         self._bar:update(self._candidates, self._cand_idx, self._cand_page)
     end
@@ -161,6 +213,18 @@ function SKKInputText:_triggerConversion()
         return
     end
     self._reading = query
+    if not Dict.isReady() then
+        -- Don't fall through to a "register new word" prompt while the DB is
+        -- still being built; the lookup would return {} for everything.
+        UIManager:show(require("ui/widget/notification"):new{
+            text = Dict.isBuilding()
+                and _("SKK: dictionary still preparing…")
+                or  _("SKK: dictionary unavailable."),
+            timeout = 2,
+        })
+        self:_refreshPreedit()
+        return
+    end
     local cands = Dict.lookup(query)
     if #cands == 0 then
         self:_showRegisterPrompt(query)
@@ -294,6 +358,10 @@ function SKKInputText:_processChar(ch)
             self:_clearPreedit()
             if flushed ~= "" then InputText.addChars(self, flushed) end
             self._skk_enabled = false
+            UIManager:show(require("ui/widget/notification"):new{
+                text = _("SKK off – press Ctrl+\\ to re-enable"),
+                timeout = 2,
+            })
             return true
         else
             self:_processRomajiDirect(ch)
@@ -493,7 +561,7 @@ function SKKInputText:onKeyPress(key)
         if state == ST_KANA or state == ST_KATAKANA then
             self:_startConvMode(key_str:lower())
             -- In SDL mode the corresponding TextInput event ("K") must be suppressed.
-            self._skip_next_textinput = Device:isSDL()
+            self._skip_textinput_at = Device:isSDL() and time.now() or nil
             return true
         end
         if state == ST_CONV then
@@ -513,7 +581,7 @@ function SKKInputText:onKeyPress(key)
             end
             self:_refreshPreedit()
             if self._state == ST_SELECT then self:_showCandidateBar() end
-            self._skip_next_textinput = Device:isSDL()
+            self._skip_textinput_at = Device:isSDL() and time.now() or nil
             return true
         end
     end
@@ -544,10 +612,16 @@ function SKKInputText:onTextInput(text)
         return InputText.onTextInput(self, text)
     end
 
-    -- Suppress TextInput that was already handled in onKeyPress (Shift+letter)
-    if self._skip_next_textinput then
-        self._skip_next_textinput = false
-        return true
+    -- Suppress TextInput that was already handled in onKeyPress (Shift+letter).
+    -- Only honor the flag if the keypress just happened (within ~50ms); stale
+    -- timestamps from an aborted sequence are ignored so we never eat an
+    -- unrelated future character.
+    if self._skip_textinput_at then
+        local age = time.since(self._skip_textinput_at)
+        self._skip_textinput_at = nil
+        if age < SKIP_TEXTINPUT_WINDOW then
+            return true
+        end
     end
 
     -- Route every received character through the SKK engine.
@@ -580,11 +654,19 @@ end
 ---------------------------------------------------------------------------
 
 function SKKInputText:getText()
-    if self._preedit_len > 0 then
-        local n = #self.charlist - self._preedit_len
-        return table.concat(self.charlist, "", 1, math.max(0, n))
+    local pe = self._preedit_chars
+    if not pe or #pe == 0 then
+        return InputText.getText(self)
     end
-    return InputText.getText(self)
+    local start = self._preedit_start or 0
+    local last  = start + #pe - 1
+    local out = {}
+    for i = 1, #self.charlist do
+        if i < start or i > last then
+            out[#out+1] = self.charlist[i]
+        end
+    end
+    return table.concat(out)
 end
 
 ---------------------------------------------------------------------------
@@ -593,7 +675,7 @@ end
 
 function SKKInputText:onCloseWidget()
     -- Commit any pending composition
-    if self._preedit_len > 0 then
+    if preeditLen(self) > 0 then
         local reading = self._reading .. Romaji.flush(self._romaji_buf)
         self._romaji_buf = ""
         self._reading = ""

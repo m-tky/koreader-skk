@@ -304,6 +304,10 @@ function M.isReady()
     return _conn ~= nil
 end
 
+function M.isBuilding()
+    return _building
+end
+
 function M.lookup(reading)
     if not _conn then return {} end
     local results, seen = {}, {}
@@ -403,33 +407,71 @@ end
 
 function M.getExtraPaths() return _extra_paths end
 
+-- Detect file encoding by sampling.
+-- Returns "utf8", "eucjp", or "unknown".
+-- Strategy:
+--   1. Look for an SKK coding declaration in the first ~512 bytes.
+--   2. Otherwise scan up to 64 KB and check whether it is valid UTF-8.
+--      Invalid UTF-8 with bytes in the EUC-JP range → "eucjp".
+local function detectEncoding(path)
+    local f = io.open(path, "rb")
+    if not f then return "unknown" end
+    local head = f:read(512) or ""
+    -- SKK files typically start with: ;; -*- coding: utf-8 -*-
+    local coding = head:lower():match("coding:%s*([%w%-_]+)")
+    if coding then
+        f:close()
+        if coding:find("utf") then return "utf8" end
+        if coding:find("euc") then return "eucjp" end
+    end
+    -- UTF-8 validity scan over a larger sample.
+    local sample = head .. (f:read(64 * 1024) or "")
+    f:close()
+    local i, n, has_high = 1, #sample, false
+    while i <= n do
+        local b = sample:byte(i)
+        if b < 0x80 then
+            i = i + 1
+        else
+            has_high = true
+            local need
+            if     b >= 0xC2 and b <= 0xDF then need = 1
+            elseif b >= 0xE0 and b <= 0xEF then need = 2
+            elseif b >= 0xF0 and b <= 0xF4 then need = 3
+            else return "eucjp" end  -- invalid UTF-8 lead byte
+            if i + need > n then break end  -- truncated, treat as valid
+            for j = 1, need do
+                local cb = sample:byte(i + j)
+                if cb < 0x80 or cb > 0xBF then return "eucjp" end
+            end
+            i = i + need + 1
+        end
+    end
+    return has_high and "utf8" or "utf8"  -- pure ASCII counts as UTF-8
+end
+
 function M.addExtraDict(path)
-    -- Deduplicate.
+    -- Dedup against the user-supplied path (covers re-add of UTF-8 files).
     for _, p in ipairs(_extra_paths) do if p == path then return true end end
 
     -- Auto-convert EUC-JP if needed (reuse iconv logic).
     if lfs.attributes(path, "mode") == "file" then
-        local f = io.open(path, "r")
-        if f then
-            local sample = f:read(512) or ""
-            f:close()
-            if sample:find("[\xA1-\xFE]") then
-                if not M.iconvAvailable() then
-                    return "EUC-JP辞書の変換にはiconvが必要ですが、\n"..
-                           "このデバイスでは利用できません。\n"..
-                           "PCでUTF-8に変換してから追加してください。"
-                end
-                local converted = M._convertEucToUtf8(path)
-                if not converted then
-                    return "EUC-JP→UTF-8変換に失敗しました。"
-                end
-                path = converted
-                for _, p in ipairs(_extra_paths) do
-                    if p == path then return true end
-                end
+        if detectEncoding(path) == "eucjp" then
+            if not M.iconvAvailable() then
+                return _("EUC-JP dictionaries need iconv to convert,\n"..
+                         "but iconv is not available on this device.\n"..
+                         "Please convert the file to UTF-8 on a PC first.")
             end
+            local converted = M._convertEucToUtf8(path)
+            if not converted then
+                return _("EUC-JP → UTF-8 conversion failed.")
+            end
+            path = converted
         end
     end
+
+    -- Dedup against the converted path (covers re-add of the same EUC-JP source).
+    for _, p in ipairs(_extra_paths) do if p == path then return true end end
 
     _extra_paths[#_extra_paths+1] = path
     G_reader_settings:saveSetting("skk_extra_dicts", _extra_paths)
@@ -483,14 +525,19 @@ function M.iconvAvailable()
     return _iconv_ok
 end
 
+-- POSIX-shell-safe single-quote escape: 'a'b' → 'a'\''b'.
+local function shellEscape(s)
+    return "'" .. s:gsub("'", "'\\''") .. "'"
+end
+
 function M._convertEucToUtf8(src)
     if not M.iconvAvailable() then return nil end
     local cache_dir = getDataDir()
     lfs.mkdir(cache_dir)
     local dst = cache_dir .. "/" .. (src:match("[^/]+$") or "dict") .. ".utf8"
     logger.info("SKK: converting", src, "→", dst)
-    local cmd = string.format(
-        "iconv -f EUC-JP -t UTF-8 %q > %q 2>/dev/null", src, dst)
+    local cmd = "iconv -f EUC-JP -t UTF-8 " .. shellEscape(src)
+        .. " > " .. shellEscape(dst) .. " 2>/dev/null"
     if os.execute(cmd) == 0 and lfs.attributes(dst, "mode") == "file" then
         return dst
     end

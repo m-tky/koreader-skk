@@ -91,6 +91,9 @@ eq(feed("nka"), "んか", "nka → んか (n before consonant)")
 eq(feed("nna"),  "んあ", "nna → んあ  (nn=ん then a=あ)")
 eq(feed("nnna"), "んな", "nnna → んな (nn=ん then na=な)")
 eq(feed("nya"), "にゃ", "nya → にゃ (ny not a standalone n)")
+eq(feed("n'"),    "ん",   "n' → ん (apostrophe commits n)")
+eq(feed("n'a"),   "んあ", "n'a → んあ")
+eq(feed("kan'i"), "かんい", "kan'i → かんい")
 
 -- ----------------------------------------------------------------
 -- processChar: z-sequences

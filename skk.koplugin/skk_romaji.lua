@@ -110,9 +110,13 @@ function M.processChar(buf, char)
         return nil, try
     end
 
-    -- Special n rule: buf=="n" and char is a consonant (not y, not another n, not vowel)
+    -- Special n rules:
+    --   buf=="n" + apostrophe → commit ん, swallow the apostrophe (standard SKK).
+    --   buf=="n" + consonant (not y/n/vowel) → commit ん, reprocess char.
+    if buf == "n" and char == "'" then
+        return "ん", ""
+    end
     if buf == "n" and not VOWELS[char] and char ~= "y" and char ~= "n" then
-        -- emit ん, then restart processing char
         local c2, b2 = M.processChar("", char)
         return "ん" .. (c2 or ""), b2
     end
