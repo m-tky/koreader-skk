@@ -4,6 +4,12 @@ A [KOReader](https://github.com/koreader/koreader) plugin that brings
 [SKK](https://ja.wikipedia.org/wiki/SKK) (Simple Kana to Kanji) style Japanese
 input to every text field in KOReader.
 
+<p align="center">
+  <img src="docs/screenshot-conversion.png" alt="Kanji conversion in a KOReader search dialog: the input field shows ▼秋 (the current candidate) while a floating candidate bar above the SKK virtual keyboard lists 1:秋 2:安墨 3:空 4:空き 5:春希 6:寒希 7:憂秊 8:嫁秊 9:光 for tap-to-select." width="380">
+  <br>
+  <em>Romaji <code>aki</code> → reading <code>あき</code> → kanji candidate <code>秋</code>, with the candidate bar offering alternatives.</em>
+</p>
+
 Works on **all KOReader platforms**:
 
 | Platform | Input method |
