@@ -19,8 +19,8 @@ globals = {
 ignore = { "111", "112", "113", "212" }
 
 -- Per-file overrides
-files["tests/test_romaji.lua"] = {
-    -- Test file defines its own globals and uses 'arg'
+files["tests/*.lua"] = {
+    -- Test files define their own globals (pass/fail counters etc.) and use 'arg'.
     globals = { "arg" },
     ignore  = { "111", "112", "113", "211", "212" },
 }

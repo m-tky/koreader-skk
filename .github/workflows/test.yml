@@ -22,4 +22,9 @@ jobs:
         run: nix develop --command luacheck skk.koplugin/*.lua tests/*.lua
 
       - name: Run unit tests
-        run: nix develop --command lua tests/test_romaji.lua
+        run: |
+          set -e
+          for t in tests/test_*.lua; do
+            echo "=== $t ==="
+            nix develop --command lua "$t"
+          done
