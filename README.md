@@ -5,9 +5,9 @@ A [KOReader](https://github.com/koreader/koreader) plugin that brings
 input to every text field in KOReader.
 
 <p align="center">
-  <img src="docs/screenshot-conversion.png" alt="Kanji conversion in a KOReader search dialog: the input field shows ▼秋 (the current candidate) while a floating candidate bar above the SKK virtual keyboard lists 1:秋 2:安墨 3:空 4:空き 5:春希 6:寒希 7:憂秊 8:嫁秊 9:光 for tap-to-select." width="380">
+  <img src="docs/screenshot-conversion.png" alt="Kanji conversion in a KOReader search dialog: the input field shows ▼漢字 (the current candidate, meaning 'kanji' itself) while a floating candidate bar above the SKK virtual keyboard lists 1:漢字 2:幹事 3:監事 4:感じ 5:寛治 6:莞爾 7:完璧 8:完治 9:官吏 for tap-to-select." width="380">
   <br>
-  <em>Romaji <code>aki</code> → reading <code>あき</code> → kanji candidate <code>秋</code>, with the candidate bar offering alternatives.</em>
+  <em>Romaji <code>Kanji</code> → reading <code>かんじ</code> → kanji candidate <code>漢字</code>, with the candidate bar offering homophones.</em>
 </p>
 
 Works on **all KOReader platforms**:
