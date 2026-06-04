@@ -20,7 +20,7 @@ local logger       = require("logger")
 local _            = require("gettext")
 
 local SQ3 = require("lua-ljsqlite3/init")
-local md5 = require("ffi/md5")
+local md5 = require("ffi/MD5")
 
 local M = {}
 
@@ -308,25 +308,137 @@ function M.isBuilding()
     return _building
 end
 
+-- ----------------------------------------------------------------
+-- Numeric variable (#) substitution
+-- ----------------------------------------------------------------
+-- SKK dictionaries store entries like "だい# /第#1/第#0/" so that any digit
+-- run in the reading maps to a single key. At lookup we replace digit runs
+-- with "#"; on display we expand #N tokens in each candidate using the
+-- captured numbers (positionally) and the format selector N.
+--
+--   #0 - arabic (as typed):       5     →  5
+--   #1 - kanji digit-by-digit:    12    →  一二
+--   #2 - kanji positional:        12    →  十二 / 1234 → 千二百三十四
+--   #3 - zenkaku arabic:          12    →  １２
+--   #5 - daiji (formal kanji):    12    →  拾弐
+-- Other formats (#4/#8/#9) are rare and left as raw "#N" if they appear.
+
+local KANJI_DIGITS = {[0]="〇", "一", "二", "三", "四", "五", "六", "七", "八", "九"}
+local DAIJI_DIGITS = {[0]="零", "壱", "弐", "参", "四", "伍", "六", "七", "八", "九"}
+local ZENKAKU      = {[0]="０", "１", "２", "３", "４", "５", "６", "７", "８", "９"}
+local UNITS_KANJI  = { man="万", sen="千", hyaku="百", juu="十" }
+local UNITS_DAIJI  = { man="萬", sen="仟", hyaku="佰", juu="拾" }
+
+local function digitByDigit(s, tbl)
+    local out = {}
+    for i = 1, #s do
+        local d = tonumber(s:sub(i, i))
+        out[#out+1] = d and tbl[d] or s:sub(i, i)
+    end
+    return table.concat(out)
+end
+
+local function intToPositional(n, tbl, units)
+    if n == 0 then return tbl[0] end
+    local out = {}
+    if n >= 10000 then
+        local man = math.floor(n / 10000)
+        out[#out+1] = intToPositional(man, tbl, units) .. units.man
+        n = n % 10000
+    end
+    local function unit(div, mark)
+        if n >= div then
+            local d = math.floor(n / div)
+            if d == 1 and div > 1 then out[#out+1] = mark
+            else out[#out+1] = tbl[d] .. mark end
+            n = n % div
+        end
+    end
+    unit(1000, units.sen)
+    unit(100,  units.hyaku)
+    unit(10,   units.juu)
+    if n > 0 then out[#out+1] = tbl[n] end
+    return table.concat(out)
+end
+
+local function expandNumberToken(num_str, format)
+    local n = tonumber(num_str)
+    if format == "0" then return num_str end
+    if format == "1" then return digitByDigit(num_str, KANJI_DIGITS) end
+    if format == "2" and n then return intToPositional(n, KANJI_DIGITS, UNITS_KANJI) end
+    if format == "3" then return digitByDigit(num_str, ZENKAKU) end
+    if format == "5" and n then return intToPositional(n, DAIJI_DIGITS, UNITS_DAIJI) end
+    return "#" .. format  -- unsupported format; leave token visible
+end
+
+local function substituteCandidate(cand, nums)
+    local i = 0
+    local out = cand:gsub("#(%d)", function(fmt)
+        i = i + 1
+        local num_str = nums[i]
+        if not num_str then return "#" .. fmt end
+        return expandNumberToken(num_str, fmt)
+    end)
+    return out
+end
+
+-- Replace each digit run in `reading` with "#". Returns (sub_reading, nums).
+local function extractNumbers(reading)
+    local nums = {}
+    local sub = reading:gsub("%d+", function(m)
+        nums[#nums+1] = m
+        return "#"
+    end)
+    return sub, nums
+end
+
+-- Exposed for unit tests.
+M._extractNumbers     = extractNumbers
+M._substituteCandidate = substituteCandidate
+M._expandNumberToken  = expandNumberToken
+
+-- ----------------------------------------------------------------
+
 function M.lookup(reading)
     if not _conn then return {} end
+
+    local lookup_key  = reading
+    local nums        = nil
+    if reading:find("%d") then
+        lookup_key, nums = extractNumbers(reading)
+        if #nums == 0 then nums = nil end
+    end
+
+    local function expand(cand)
+        if nums then return substituteCandidate(cand, nums) end
+        return cand
+    end
+
     local results, seen = {}, {}
-    -- User dict first, sorted by use frequency then recency.
+    local function add(c)
+        if not seen[c] then
+            results[#results+1] = c
+            seen[c] = true
+        end
+    end
+
+    -- User dict first, sorted by use frequency then recency. User entries
+    -- are recorded under the exact reading (no # substitution).
     local ustmt = _conn:prepare(
         "SELECT candidate FROM user_dict WHERE reading=?"..
         " ORDER BY use_count DESC, last_used DESC")
     ustmt:reset():bind(reading)
     local row = ustmt:step()
     while row do
-        results[#results+1] = row[1]; seen[row[1]] = true
+        add(row[1])
         row = ustmt:step()
     end
-    -- Main dict, deduplicating against user dict results.
+    -- Main dict: look up the # version when numbers were present, then expand.
     local mrow = _conn:prepare("SELECT candidates FROM dict WHERE reading=?")
-                      :reset():bind(reading):step()
+                      :reset():bind(lookup_key):step()
     if mrow then
         for c in mrow[1]:gmatch("[^|]+") do
-            if not seen[c] then results[#results+1] = c; seen[c] = true end
+            add(expand(c))
         end
     end
     return results

@@ -118,10 +118,13 @@ local function wrapInputBox(inputbox)
     inputbox._skk_vkbd_wrapped = true
 
     -- Preserve in-progress composition across rebuilds
-    inputbox._skk_mode       = inputbox._skk_mode       or S.mode
-    inputbox._skk_state      = inputbox._skk_state      or "direct"
-    inputbox._skk_romaji_buf = inputbox._skk_romaji_buf or ""
-    inputbox._skk_reading    = inputbox._skk_reading    or ""
+    inputbox._skk_mode         = inputbox._skk_mode         or S.mode
+    inputbox._skk_state        = inputbox._skk_state        or "direct"
+    inputbox._skk_romaji_buf   = inputbox._skk_romaji_buf   or ""
+    inputbox._skk_reading      = inputbox._skk_reading      or ""
+    -- Okurigana tracking in SELECT (see skk_inputtext.lua for details).
+    if inputbox._skk_okuri_active == nil then inputbox._skk_okuri_active = false end
+    inputbox._skk_okuri_kana   = inputbox._skk_okuri_kana   or ""
     if inputbox._skk_hint_len == nil then inputbox._skk_hint_len = 0 end
     if inputbox._skk_cand_idx == nil then inputbox._skk_cand_idx = 1 end
     if inputbox._skk_state == "select" then
@@ -236,29 +239,46 @@ local function wrapInputBox(inputbox)
                 and text and text ~= "" and Dict then
             Dict.register(ib._skk_reading, text)
         end
-        -- Preserve okurigana consonant (e.g. "b" from TaB): SKK-JISYO.L stores
-        -- okurigana candidates as bare kanji (e.g. /食/), so after committing the
-        -- kanji the user still needs to type the vowel to complete the okurigana.
-        local saved_buf = ib._skk_romaji_buf
+        -- Okurigana handling. SKK-JISYO.L stores okurigana candidates as bare
+        -- kanji (e.g. /食/), so after committing the kanji we still owe the
+        -- okurigana. `okuri_kana` holds kana already completed in SELECT;
+        -- those go into the document together with the kanji. A leftover
+        -- consonant in `_skk_romaji_buf` (e.g. user committed by index before
+        -- typing the vowel) is preserved as preedit awaiting the vowel.
+        local saved_buf  = ib._skk_romaji_buf
+        local okuri_kana = ib._skk_okuri_kana or ""
         delHint(ib)
-        ib._skk_state      = "direct"
-        ib._skk_reading    = ""
-        ib._skk_cands      = nil
-        ib._skk_cand_idx   = 1
-        ib._skk_romaji_buf = saved_buf
+        ib._skk_state         = "direct"
+        ib._skk_reading       = ""
+        ib._skk_cands         = nil
+        ib._skk_cand_idx      = 1
+        ib._skk_romaji_buf    = ""
+        ib._skk_okuri_active  = false
+        ib._skk_okuri_kana    = ""
         exitSelectMode(ib)
         rebuildKeyboard()  -- restore row 1 to punctuation
-        if text and text ~= "" then ib.addChars:raw_method_call(text) end
-        if saved_buf ~= "" then putHint(ib, saved_buf) end
+        local committed_text = (text or "") .. okuri_kana
+        if committed_text ~= "" then ib.addChars:raw_method_call(committed_text) end
+        if saved_buf ~= "" then
+            local flushed = flushRomaji(saved_buf)
+            if flushed ~= saved_buf then
+                ib.addChars:raw_method_call(flushed)
+            else
+                ib._skk_romaji_buf = saved_buf
+                putHint(ib, saved_buf)
+            end
+        end
     end
 
     local function cancelAll(ib)
         delHint(ib)
-        ib._skk_state      = "direct"
-        ib._skk_reading    = ""
-        ib._skk_cands      = nil
-        ib._skk_cand_idx   = 1
-        ib._skk_romaji_buf = ""
+        ib._skk_state         = "direct"
+        ib._skk_reading       = ""
+        ib._skk_cands         = nil
+        ib._skk_cand_idx      = 1
+        ib._skk_romaji_buf    = ""
+        ib._skk_okuri_active  = false
+        ib._skk_okuri_kana    = ""
         exitSelectMode(ib)
         rebuildKeyboard()
     end
@@ -273,8 +293,12 @@ local function wrapInputBox(inputbox)
         elseif state == "select" then
             local cands = ib._skk_cands
             if cands and #cands > 0 then
-                local sel   = cands[ib._skk_cand_idx] or ""
-                local okuri = buf ~= "" and ("*"..buf) or ""
+                local sel       = cands[ib._skk_cand_idx] or ""
+                local okuri_k   = ib._skk_okuri_kana or ""
+                local okuri     = ""
+                if okuri_k ~= "" or buf ~= "" then
+                    okuri = "*" .. okuri_k .. buf
+                end
                 putHint(ib, "▼"..sel..okuri)
             end
         end
@@ -404,7 +428,16 @@ local function wrapInputBox(inputbox)
             local cands = ib._skk_cands or {}
             if char == " " then
                 local n = #cands
-                ib._skk_cand_idx = n==0 and 1 or (ib._skk_cand_idx % n) + 1
+                if n == 0 then return end
+                if ib._skk_cand_idx >= n then
+                    -- ddskk: advancing past the last candidate opens the
+                    -- register-new-word prompt for the current reading.
+                    local reading = (ib._skk_reading or "") .. (ib._skk_okuri_kana or "")
+                    cancelAll(ib)
+                    showRegisterPrompt(ib, reading)
+                    return
+                end
+                ib._skk_cand_idx = ib._skk_cand_idx + 1
                 local pg = math.ceil(ib._skk_cand_idx / CANDS_PER_PAGE)
                 if pg ~= S.page then S.page = pg end
                 refreshPreedit(ib)
@@ -414,20 +447,59 @@ local function wrapInputBox(inputbox)
                 cancelAll(ib); return
             elseif char == "\n" then
                 commitText(ib, cands[ib._skk_cand_idx] or ""); return
-            else
-                local n = tonumber(char)
-                if n and n >= 1 and n <= CANDS_PER_PAGE then
-                    local idx = (S.page-1)*CANDS_PER_PAGE + n
-                    if cands[idx] then
-                        ib._skk_cand_idx = idx
-                        commitText(ib, cands[idx]); return
-                    end
-                end
-                -- other chars: commit then reprocess
-                local sel = cands[ib._skk_cand_idx] or ""
-                commitText(ib, sel)
-                wrappedAddChars(ib, char); return
+            elseif char == "q" then
+                -- ddskk: q in SELECT commits the reading (with okurigana) as
+                -- katakana, discarding the candidate kanji. We do NOT call
+                -- Dict.register here — the user explicitly chose to throw
+                -- the lookup result away.
+                local kata = toKatakana((ib._skk_reading or "")
+                    .. (ib._skk_okuri_kana or ""))
+                delHint(ib)
+                ib._skk_state         = "direct"
+                ib._skk_reading       = ""
+                ib._skk_cands         = nil
+                ib._skk_cand_idx      = 1
+                ib._skk_romaji_buf    = ""
+                ib._skk_okuri_active  = false
+                ib._skk_okuri_kana    = ""
+                exitSelectMode(ib)
+                rebuildKeyboard()
+                if kata ~= "" then ib.addChars:raw_method_call(kata) end
+                return
             end
+            local n = tonumber(char)
+            if n and n >= 1 and n <= CANDS_PER_PAGE then
+                local idx = (S.page-1)*CANDS_PER_PAGE + n
+                if cands[idx] then
+                    ib._skk_cand_idx = idx
+                    commitText(ib, cands[idx]); return
+                end
+            end
+            -- Okurigana continuation: accept only when the new char actually
+            -- progresses the romaji (produces kana or extends the prefix).
+            -- Letters like q/l that would just flush the buffer raw fall
+            -- through to the auto-commit-and-reprocess path below.
+            if ib._skk_okuri_active and #char == 1 and char:match("[a-z]") then
+                local orig_buf = ib._skk_romaji_buf
+                local committed, new_buf = processChar(orig_buf, char)
+                local commits_kana   = committed and committed ~= "" and committed ~= orig_buf
+                local extends_prefix = #new_buf > #orig_buf
+                if commits_kana or extends_prefix then
+                    ib._skk_romaji_buf = new_buf
+                    if commits_kana then
+                        ib._skk_okuri_kana = (ib._skk_okuri_kana or "") .. committed
+                    end
+                    refreshPreedit(ib)
+                    showCandBar(cands, ib._skk_cand_idx, S.page)
+                    return
+                end
+                -- else: fall through to auto-commit + reprocess
+            end
+            -- Other chars (non-okurigana SELECT, or punctuation): commit
+            -- then reprocess.
+            local sel = cands[ib._skk_cand_idx] or ""
+            commitText(ib, sel)
+            wrappedAddChars(ib, char); return
         end
 
         -- ▽ CONV state
@@ -453,6 +525,8 @@ local function wrapInputBox(inputbox)
                     if #cands > 0 then
                         ib._skk_cands=cands; ib._skk_cand_idx=1
                         ib._skk_state="select"; S.cands=cands; S.page=1
+                        ib._skk_okuri_active = true
+                        ib._skk_okuri_kana   = ""
                         refreshPreedit(ib); enterSelectMode(ib); return
                     end
                 end

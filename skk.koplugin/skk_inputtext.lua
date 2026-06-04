@@ -25,6 +25,7 @@ local ST_KANA     = "kana"
 local ST_KATAKANA = "katakana"
 local ST_CONV     = "conv"
 local ST_SELECT   = "select"
+local ST_ABBREV   = "abbrev"  -- ASCII abbreviation lookup (entered via '/')
 
 local MARK_CONV   = "▽"
 local MARK_SELECT = "▼"
@@ -40,6 +41,13 @@ local SKKInputText = InputText:extend{
     _candidates          = nil,
     _cand_idx            = 1,
     _cand_page           = 1,
+    -- Okurigana state for SELECT. _okuri_active is true while the current
+    -- SELECT was entered via an okurigana trigger (Shift+letter in CONV); in
+    -- that case further [a-z] keystrokes extend the okurigana rather than
+    -- auto-committing. _okuri_kana is the kana already completed from the
+    -- okurigana romaji; it gets appended to the candidate on commit.
+    _okuri_active        = false,
+    _okuri_kana          = "",
     -- Preedit is tracked as (start index in charlist, exact chars inserted).
     -- This survives cursor movement and lets us bail out cleanly if the user
     -- edits inside the preedit region (rather than deleting the wrong chars).
@@ -120,9 +128,14 @@ function SKKInputText:_preeditText()
         return self._romaji_buf
     elseif self._state == ST_CONV then
         return MARK_CONV .. self._reading .. self._romaji_buf
+    elseif self._state == ST_ABBREV then
+        return MARK_CONV .. self._reading
     elseif self._state == ST_SELECT then
         local sel   = self._candidates and self._candidates[self._cand_idx] or ""
-        local okuri = self._romaji_buf ~= "" and ("*"..self._romaji_buf) or ""
+        local okuri = ""
+        if (self._okuri_kana and self._okuri_kana ~= "") or self._romaji_buf ~= "" then
+            okuri = "*" .. (self._okuri_kana or "") .. self._romaji_buf
+        end
         return MARK_SELECT .. sel .. okuri
     end
     return ""
@@ -204,9 +217,15 @@ end
 ---------------------------------------------------------------------------
 
 function SKKInputText:_triggerConversion()
-    local flushed = Romaji.flush(self._romaji_buf)
-    self._romaji_buf = ""
-    local query = self._reading .. flushed
+    -- In ABBREV state the reading is the literal ASCII buffer; no romaji flush.
+    local query
+    if self._state == ST_ABBREV then
+        query = self._reading
+    else
+        local flushed = Romaji.flush(self._romaji_buf)
+        self._romaji_buf = ""
+        query = self._reading .. flushed
+    end
     if query == "" then
         self._state = ST_KANA
         self:_clearPreedit()
@@ -274,35 +293,67 @@ function SKKInputText:_showRegisterPrompt(reading)
 end
 
 function SKKInputText:_commitCandidate()
-    local cand = (self._candidates and self._candidates[self._cand_idx]) or ""
-    local saved_buf = self._romaji_buf  -- preserve okurigana consonant (e.g. "b")
-    -- Track usage before clearing reading.
+    local cand       = (self._candidates and self._candidates[self._cand_idx]) or ""
+    local saved_buf  = self._romaji_buf
+    local okuri_kana = self._okuri_kana or ""
     if self._reading ~= "" and cand ~= "" then
         Dict.register(self._reading, cand)
     end
     self:_closeCandidateBar()
-    self._state      = ST_KANA
-    self._reading    = ""
-    self._candidates = nil
-    self._cand_idx   = 1
-    self._cand_page  = 1
-    self._romaji_buf = saved_buf
-    self:_commit(cand)
-    if saved_buf ~= "" then self:_setPreedit(saved_buf) end
+    self._state         = ST_KANA
+    self._reading       = ""
+    self._candidates    = nil
+    self._cand_idx      = 1
+    self._cand_page     = 1
+    self._romaji_buf    = ""
+    self._okuri_kana    = ""
+    self._okuri_active  = false
+    self:_commit(cand .. okuri_kana)
+    -- A partial-consonant romaji (e.g. "g" from NuG when the user committed by
+    -- index before typing the vowel) is preserved as preedit. A complete
+    -- romaji (vowel "i"/"a", single "n") is flushed to kana and committed.
+    if saved_buf ~= "" then
+        local flushed = Romaji.flush(saved_buf)
+        if flushed ~= saved_buf then
+            InputText.addChars(self, flushed)
+        else
+            self._romaji_buf = saved_buf
+            self:_setPreedit(saved_buf)
+        end
+    end
 end
 
 function SKKInputText:_cancelSelection()
     self:_closeCandidateBar()
-    self._state      = ST_CONV
-    self._candidates = nil
-    self._cand_idx   = 1
-    self._cand_page  = 1
+    self._state         = ST_CONV
+    self._candidates    = nil
+    self._cand_idx      = 1
+    self._cand_page     = 1
+    self._okuri_active  = false
+    self._okuri_kana    = ""
+    self._romaji_buf    = ""
     self:_refreshPreedit()
 end
 
 function SKKInputText:_nextCandidate()
     if not self._candidates then return end
-    self._cand_idx = math.min(self._cand_idx + 1, #self._candidates)
+    -- ddskk: advancing past the last candidate triggers a register-new-word
+    -- prompt rather than wrapping. The reading+okurigana that we accumulated
+    -- is what the user wants to add an entry for.
+    if self._cand_idx >= #self._candidates then
+        local reading = (self._reading or "") .. (self._okuri_kana or "")
+        if reading == "" then reading = self._reading or "" end
+        self:_closeCandidateBar()
+        self._candidates    = nil
+        self._cand_idx      = 1
+        self._cand_page     = 1
+        self._okuri_active  = false
+        self._okuri_kana    = ""
+        self._romaji_buf    = ""
+        self:_showRegisterPrompt(reading)
+        return
+    end
+    self._cand_idx = self._cand_idx + 1
     if self._cand_idx >= self._cand_page + Dict.PAGE_SIZE then
         self._cand_page = self._cand_page + Dict.PAGE_SIZE
     end
@@ -363,10 +414,28 @@ function SKKInputText:_processChar(ch)
                 timeout = 2,
             })
             return true
+        elseif ch == "/" and self._romaji_buf == "" then
+            -- Enter abbrev mode for ASCII-keyed dictionary lookup.
+            self:_clearPreedit()
+            self._state   = ST_ABBREV
+            self._reading = ""
+            self:_refreshPreedit()
+            return true
         else
             self:_processRomajiDirect(ch)
             return true
         end
+    end
+
+    -- ---- ABBREV (▽ ASCII mode) ----
+    if self._state == ST_ABBREV then
+        if ch == " " then
+            self:_triggerConversion()
+            return true
+        end
+        self._reading = self._reading .. ch
+        self:_refreshPreedit()
+        return true
     end
 
     -- ---- CONV (▽ mode) ----
@@ -390,29 +459,76 @@ function SKKInputText:_processChar(ch)
 
     -- ---- SELECT (▼ mode) ----
     if self._state == ST_SELECT then
-        if ch == " " or ch == "n" then
+        -- Universal navigation keys (always interpreted as navigation, even
+        -- while okurigana is being typed).
+        if ch == " " then
+            self:_nextCandidate()
+            return true
+        elseif ch == "x" then
+            self:_cancelSelection()
+            return true
+        elseif ch == "q" then
+            -- ddskk: q in SELECT commits the reading (with okurigana) as
+            -- katakana, discarding the candidate kanji. Useful for words you
+            -- realized after the lookup you wanted in katakana.
+            local kata = Romaji.toKatakana((self._reading or "")
+                .. (self._okuri_kana or ""))
+            self:_closeCandidateBar()
+            self._state         = ST_KANA
+            self._reading       = ""
+            self._candidates    = nil
+            self._cand_idx      = 1
+            self._cand_page     = 1
+            self._romaji_buf    = ""
+            self._okuri_active  = false
+            self._okuri_kana    = ""
+            self:_commit(kata)
+            return true
+        end
+        local num = tonumber(ch)
+        if num and num >= 1 and num <= Dict.PAGE_SIZE then
+            local idx = self._cand_page + num - 1
+            if idx <= #self._candidates then
+                self._cand_idx = idx
+            end
+            self:_commitCandidate()
+            return true
+        end
+
+        -- Okurigana continuation: in okurigana-mode SELECT a letter extends
+        -- the okurigana romaji ONLY if it makes real progress — either kana
+        -- is produced or the buffer grows to a longer prefix. Letters that
+        -- would just flush the buffer raw (e.g. q, l) fall through to the
+        -- auto-commit-and-reprocess path so they keep their conventional
+        -- meaning (q → mode toggle, l → ASCII) in the new word.
+        if self._okuri_active and ch:match("[a-z]") then
+            local orig_buf = self._romaji_buf
+            local committed, new_buf = Romaji.processChar(orig_buf, ch)
+            local commits_kana   = committed and committed ~= "" and committed ~= orig_buf
+            local extends_prefix = #new_buf > #orig_buf
+            if commits_kana or extends_prefix then
+                self._romaji_buf = new_buf
+                if commits_kana then
+                    self._okuri_kana = (self._okuri_kana or "") .. committed
+                end
+                self:_refreshPreedit()
+                return true
+            end
+            -- else: fall through to auto-commit + reprocess
+        end
+
+        -- Outside okurigana mode, n/p navigate candidates.
+        if ch == "n" then
             self:_nextCandidate()
             return true
         elseif ch == "p" then
             self:_prevCandidate()
             return true
-        elseif ch == "x" then
-            self:_cancelSelection()
-            return true
-        else
-            local n = tonumber(ch)
-            if n and n >= 1 and n <= Dict.PAGE_SIZE then
-                local idx = self._cand_page + n - 1
-                if idx <= #self._candidates then
-                    self._cand_idx = idx
-                end
-                self:_commitCandidate()
-                return true
-            end
-            -- Unknown char: commit current candidate then reprocess in new state
-            self:_commitCandidate()
-            return self:_processChar(ch)
         end
+
+        -- Unknown char: commit current candidate then reprocess in new state
+        self:_commitCandidate()
+        return self:_processChar(ch)
     end
 
     return false
@@ -421,6 +537,29 @@ end
 ---------------------------------------------------------------------------
 -- Start conversion mode (▽) – used from both onKeyPress (Shift+letter)
 ---------------------------------------------------------------------------
+
+-- Okurigana trigger: invoked when a Shift+letter (uppercase) lands while in
+-- CONV mode. The romaji_buf is preserved as the okurigana consonant; the
+-- dict is looked up with reading+consonant, then reading alone as fallback.
+function SKKInputText:_okuriganaTrigger(lower_char)
+    local reading = self._reading .. Romaji.flush(self._romaji_buf)
+    self._romaji_buf = lower_char
+    if reading ~= "" then
+        self._reading = reading
+        local cands = Dict.lookup(reading .. lower_char)
+        if #cands == 0 then cands = Dict.lookup(reading) end
+        if #cands > 0 then
+            self._candidates    = cands
+            self._cand_idx      = 1
+            self._cand_page     = 1
+            self._state         = ST_SELECT
+            self._okuri_active  = true
+            self._okuri_kana    = ""
+        end
+    end
+    self:_refreshPreedit()
+    if self._state == ST_SELECT then self:_showCandidateBar() end
+end
 
 function SKKInputText:_startConvMode(first_lower_char)
     -- Flush any current kana preedit into committed text
@@ -431,8 +570,10 @@ function SKKInputText:_startConvMode(first_lower_char)
         if self._state == ST_KATAKANA then flushed = Romaji.toKatakana(flushed) end
         InputText.addChars(self, flushed)
     end
-    self._state   = ST_CONV
-    self._reading = ""
+    self._state         = ST_CONV
+    self._reading       = ""
+    self._okuri_active  = false
+    self._okuri_kana    = ""
     self:_processRomajiReading(first_lower_char)
 end
 
@@ -462,9 +603,32 @@ function SKKInputText:_handleSpecialKey(key, key_str, ctrl)
 
     -- Backspace / Ctrl+H
     if key["Backspace"] or (ctrl and key_str == "H") then
+        -- Progressive deletion: trim the deepest pending input first.
         if self._romaji_buf ~= "" then
             self._romaji_buf = self._romaji_buf:sub(1, -2)
             self:_refreshPreedit()
+            return true
+        end
+        if state == ST_SELECT and self._okuri_kana and self._okuri_kana ~= "" then
+            local chars = util.splitToChars(self._okuri_kana)
+            table.remove(chars)
+            self._okuri_kana = table.concat(chars)
+            self:_refreshPreedit()
+            return true
+        end
+        if state == ST_ABBREV then
+            if #self._reading > 0 then
+                self._reading = self._reading:sub(1, -2)
+                if self._reading == "" then
+                    self._state = ST_KANA
+                    self:_clearPreedit()
+                else
+                    self:_refreshPreedit()
+                end
+            else
+                self._state = ST_KANA
+                self:_clearPreedit()
+            end
             return true
         end
         if state == ST_CONV then
@@ -505,6 +669,14 @@ function SKKInputText:_handleSpecialKey(key, key_str, ctrl)
             self._reading = ""
             self._state = ST_KANA
             self:_commit(reading)
+            return true
+        end
+        if state == ST_ABBREV then
+            -- Commit the abbrev string verbatim (ASCII).
+            local text = self._reading
+            self._reading = ""
+            self._state = ST_KANA
+            self:_commit(text)
             return true
         end
         if state == ST_SELECT then
@@ -565,22 +737,15 @@ function SKKInputText:onKeyPress(key)
             return true
         end
         if state == ST_CONV then
-            -- Okurigana: look up reading+consonant, enter SELECT if candidates found
-            local reading = self._reading .. Romaji.flush(self._romaji_buf)
-            self._romaji_buf = key_str:lower()
-            if reading ~= "" then
-                self._reading = reading
-                local cands = Dict.lookup(reading .. key_str:lower())
-                if #cands == 0 then cands = Dict.lookup(reading) end
-                if #cands > 0 then
-                    self._candidates = cands
-                    self._cand_idx   = 1
-                    self._cand_page  = 1
-                    self._state      = ST_SELECT
-                end
-            end
-            self:_refreshPreedit()
-            if self._state == ST_SELECT then self:_showCandidateBar() end
+            self:_okuriganaTrigger(key_str:lower())
+            self._skip_textinput_at = Device:isSDL() and time.now() or nil
+            return true
+        end
+        if state == ST_SELECT then
+            -- Commit current candidate then start a new ▽ session with the
+            -- typed letter. Matches ddskk's "chain into next word" behavior.
+            self:_commitCandidate()
+            self:_startConvMode(key_str:lower())
             self._skip_textinput_at = Device:isSDL() and time.now() or nil
             return true
         end
@@ -634,10 +799,15 @@ function SKKInputText:onTextInput(text)
         -- uppercase can be handled later.
         local lower_ch = ch:lower()
         if lower_ch ~= ch then
-            -- Uppercase letter that wasn't caught in onKeyPress (e.g., direct paste)
-            -- Treat as conversion trigger the same way.
+            -- Uppercase letter not caught by onKeyPress (e.g., direct paste).
+            -- Route by state the same way the onKeyPress shift handler does.
             local state = self._state
             if state == ST_KANA or state == ST_KATAKANA then
+                self:_startConvMode(lower_ch)
+            elseif state == ST_CONV then
+                self:_okuriganaTrigger(lower_ch)
+            elseif state == ST_SELECT then
+                self:_commitCandidate()
                 self:_startConvMode(lower_ch)
             else
                 self:_processChar(lower_ch)
