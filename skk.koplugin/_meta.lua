@@ -1,7 +1,7 @@
 local _ = require("gettext")
 return {
     fullname = _("SKK Japanese Input"),
-    version  = "0.4.1",
+    version  = "0.5.0",
     description = _([[
 SKK (Simple Kana to Kanji) input method for Japanese text.
 
