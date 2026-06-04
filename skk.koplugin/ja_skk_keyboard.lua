@@ -71,9 +71,6 @@ end
 --   normal mode → mode indicator + Japanese punctuation
 -- ----------------------------------------------------------------
 local function genFirstRow()
-    local mode = S.mode or "kana"
-    local lbl  = mode=="kana" and "あ" or mode=="katakana" and "ア" or "A"
-
     if S.select then
         -- Number keys for candidate selection
         return {
@@ -83,8 +80,11 @@ local function genFirstRow()
             {"x","x","x","x", label="✕"},   -- cancel selection
         }
     else
+        -- Mode cycling (あ→ア→A) lives on row 5 next to the space bar; the
+        -- top-left slot used to duplicate that, so it's been reclaimed for a
+        -- frequently-used punctuation mark instead.
         return {
-            {SKK_MODE,SKK_MODE,SKK_MODE,SKK_MODE, label=lbl, bold=true},
+            {"…","…","…","…"},
             {"、","、","、","、"}, {"。","。","。","。"}, {"・","・","・","・"},
             {"「","「","「","「"}, {"」","」","」","」"}, {"ー","ー","ー","ー"},
             {"〜","〜","〜","〜"}, {"？","？","？","？"}, {"！","！","！","！"},
@@ -149,6 +149,13 @@ local function wrapInputBox(inputbox)
         end
     end
 
+    -- Forward declarations: showCandBar's callbacks close over commitText and
+    -- refreshPreedit, which are defined further down. Lua locals don't hoist,
+    -- so without these forward `local`s the callbacks would resolve them as
+    -- (nil) globals and crash on tap-to-select / tap-next-page.
+    local commitText
+    local refreshPreedit
+
     -- Floating candidate bar (shown above the virtual keyboard in SELECT mode).
     -- S.bar is used instead of a wrapInputBox-local so it survives the
     -- unwrap+rewrap cycle that rebuildKeyboard() triggers via init().
@@ -165,6 +172,26 @@ local function wrapInputBox(inputbox)
                     if not (ib and ib._skk_cands and ib._skk_cands[abs_idx]) then return end
                     ib._skk_cand_idx = abs_idx
                     commitText(ib, ib._skk_cands[abs_idx])
+                end,
+                on_next_page = function()
+                    local ib = S.ib
+                    if not (ib and ib._skk_cands) then return end
+                    local all = ib._skk_cands
+                    local max_page = math.ceil(#all / CANDS_PER_PAGE)
+                    if S.page >= max_page then return end
+                    S.page = S.page + 1
+                    ib._skk_cand_idx = (S.page - 1) * CANDS_PER_PAGE + 1
+                    refreshPreedit(ib)
+                    showCandBar(all, ib._skk_cand_idx, S.page)
+                end,
+                on_prev_page = function()
+                    local ib = S.ib
+                    if not (ib and ib._skk_cands) then return end
+                    if S.page <= 1 then return end
+                    S.page = S.page - 1
+                    ib._skk_cand_idx = (S.page - 1) * CANDS_PER_PAGE + 1
+                    refreshPreedit(ib)
+                    showCandBar(ib._skk_cands, ib._skk_cand_idx, S.page)
                 end,
             }
             -- Position just above the virtual keyboard.
@@ -188,6 +215,10 @@ local function wrapInputBox(inputbox)
 
     local function enterSelectMode(ib)
         S.select = true
+        -- Prevent InputDialog from closing the keyboard when the user taps the
+        -- candidate bar above it (InputDialog treats any tap outside the
+        -- keyboard frame as a dismiss gesture).
+        if ib.parent then ib.parent.deny_keyboard_hiding = true end
         showCandBar(ib._skk_cands, ib._skk_cand_idx, S.page)
     end
 
@@ -195,10 +226,11 @@ local function wrapInputBox(inputbox)
         S.select = false
         S.cands  = {}
         S.page   = 1
+        if ib.parent then ib.parent.deny_keyboard_hiding = false end
         hideCandBar()
     end
 
-    local function commitText(ib, text)
+    commitText = function(ib, text)
         -- Track usage when committing a dictionary candidate (SELECT state).
         if ib._skk_state == "select" and ib._skk_reading and ib._skk_reading ~= ""
                 and text and text ~= "" and Dict then
@@ -231,7 +263,7 @@ local function wrapInputBox(inputbox)
         rebuildKeyboard()
     end
 
-    local function refreshPreedit(ib)
+    refreshPreedit = function(ib)
         local state = ib._skk_state
         local buf   = ib._skk_romaji_buf
         if state == "direct" then
@@ -577,7 +609,10 @@ q → toggle hiragana/katakana; l → ASCII mode
         },
         -- Row 4
         {
-            {label="⇧", width=1.5},
+            -- Empty-string key fields make VirtualKey treat shift as releasable
+            -- (releasable = key == ""), so a single tap behaves like upstream:
+            -- one-shot for normal letters, capslock on long-press.
+            {"","","","", label="⇧", width=1.5},
             {"Z","z","ー","-"},{"X","x","＿","_"},{"C","c","＋","+"},
             {"V","v","＝","="},{"B","b","／","/"},{"N","n","￥","\\"},
             {"M","m","、",","},

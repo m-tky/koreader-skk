@@ -35,6 +35,13 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Build skk.koplugin.zip
+        if: steps.tag.outputs.exists == 'false'
+        run: |
+          zip -r skk.koplugin.zip skk.koplugin \
+            -x 'skk.koplugin/.*' 'skk.koplugin/*~' 'skk.koplugin/*.bak'
+          unzip -l skk.koplugin.zip
+
       - name: Create GitHub Release
         if: steps.tag.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
@@ -42,11 +49,4 @@ jobs:
           tag_name: v${{ steps.meta.outputs.version }}
           name: v${{ steps.meta.outputs.version }}
           generate_release_notes: true
-          files: |
-            skk.koplugin/_meta.lua
-            skk.koplugin/main.lua
-            skk.koplugin/skk_dictionary.lua
-            skk.koplugin/skk_inputtext.lua
-            skk.koplugin/skk_romaji.lua
-            skk.koplugin/ja_skk_keyboard.lua
-            skk.koplugin/SKK-JISYO.utf8
+          files: skk.koplugin.zip

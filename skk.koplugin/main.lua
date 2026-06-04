@@ -39,11 +39,7 @@ local SKKInputText = require("skk_inputtext")
 local _meta = require("_meta")
 local PLUGIN_VERSION = _meta.version or "0.0.0"
 local GITHUB_REPO    = "m-tky/koreader-skk"
-local PLUGIN_FILES   = {
-    "_meta.lua", "main.lua", "skk_dictionary.lua",
-    "skk_inputtext.lua", "skk_romaji.lua", "ja_skk_keyboard.lua",
-    "SKK-JISYO.utf8",   -- dictionary; triggers auto-rebuild of SQLite DB after download
-}
+local RELEASE_ASSET  = "skk.koplugin.zip"
 
 local SKK = WidgetContainer:extend{
     name = "skk",
@@ -482,6 +478,31 @@ local function httpGet(url)
     return nil, string.format("HTTP %s", tostring(code))
 end
 
+-- Stream a URL straight to disk. Used for the release zip so the dictionary
+-- (~6 MB) never lives in RAM. Returns true on success, or nil + error.
+local function httpDownload(url, dest_path)
+    local http       = require("socket.http")
+    local ltn12      = require("ltn12")
+    local socketutil = require("socketutil")
+    local f, ferr = io.open(dest_path, "wb")
+    if not f then return nil, ferr end
+    socketutil:set_timeout(15, 120)
+    local ok, code = http.request{
+        url     = url,
+        headers = { ["User-Agent"] = "koreader-skk/" .. PLUGIN_VERSION },
+        sink    = ltn12.sink.file(f),  -- closes f on completion
+    }
+    socketutil:reset_timeout()
+    if ok and code == 200 then return true end
+    return nil, string.format("HTTP %s", tostring(code))
+end
+
+local function findReleaseAsset(release_data, asset_name)
+    for _, a in ipairs(release_data.assets or {}) do
+        if a.name == asset_name then return a.browser_download_url end
+    end
+end
+
 function SKK:_checkForUpdates()
     local checking = InfoMessage:new{ text = _("Checking for updates…") }
     UIManager:show(checking)
@@ -519,6 +540,16 @@ function SKK:_checkForUpdates()
         return
     end
 
+    local asset_url = findReleaseAsset(data, RELEASE_ASSET)
+    if not asset_url then
+        UIManager:show(InfoMessage:new{
+            text = string.format(
+                _("Update v%s is available but no %s asset was attached.\nPlease reinstall manually."),
+                remote_tag, RELEASE_ASSET),
+        })
+        return
+    end
+
     -- Truncate release notes for display.
     local display_notes = #notes > 300
         and notes:sub(1, 300) .. "\n…"
@@ -531,16 +562,15 @@ function SKK:_checkForUpdates()
         ok_text     = _("Update"),
         cancel_text = _("Later"),
         ok_callback = function()
-            self:_downloadUpdate(remote_tag)
+            self:_downloadUpdate(remote_tag, asset_url)
         end,
     })
 end
 
-function SKK:_downloadUpdate(tag)
-    local plugin_dir = Dict.getPluginDir()
-    local base_url   = string.format(
-        "https://raw.githubusercontent.com/%s/v%s/skk.koplugin/",
-        GITHUB_REPO, tag)
+function SKK:_downloadUpdate(tag, asset_url)
+    local plugin_dir  = Dict.getPluginDir()
+    local DataStorage = require("datastorage")
+    local zip_path    = DataStorage:getDataDir() .. "/cache/skk_update.zip"
 
     local progress = InfoMessage:new{
         text = string.format(_("Downloading update v%s…"), tag),
@@ -548,32 +578,66 @@ function SKK:_downloadUpdate(tag)
     UIManager:show(progress)
     UIManager:forceRePaint()
 
-    local failed = {}
-    for _, fname in ipairs(PLUGIN_FILES) do
-        local content, err = httpGet(base_url .. fname)
-        if content then
-            local dest = plugin_dir .. "/" .. fname
-            -- Write to a temp file first, then rename atomically.
-            local tmp = dest .. ".tmp"
-            local f = io.open(tmp, "w")
-            if f then
-                f:write(content)
-                f:close()
-                os.rename(tmp, dest)
+    local ok, err = httpDownload(asset_url, zip_path)
+    if not ok then
+        UIManager:close(progress)
+        UIManager:show(InfoMessage:new{
+            text = string.format(_("Download failed:\n%s"), err or "unknown error"),
+        })
+        os.remove(zip_path)
+        return
+    end
+
+    -- Extract zip entries directly into the plugin directory.
+    local archiver = require("ffi/archiver")
+    local reader = archiver.Reader:new()
+    if not reader:open(zip_path) then
+        UIManager:close(progress)
+        UIManager:show(InfoMessage:new{
+            text = string.format(_("Could not open downloaded archive:\n%s"),
+                reader.err or "unknown error"),
+        })
+        os.remove(zip_path)
+        return
+    end
+
+    local failed, extracted = {}, 0
+    for entry in reader:iterate() do
+        -- Only entries packaged under "skk.koplugin/" are written; anything
+        -- else is treated as foreign and skipped.
+        local rel = entry.path:match("^skk%.koplugin/(.+)$")
+        if rel and entry.mode == "file" then
+            local content = reader:extractToMemory(entry.path)
+            if content then
+                local dest = plugin_dir .. "/" .. rel
+                local tmp  = dest .. ".tmp"
+                local f, ferr = io.open(tmp, "wb")
+                if f then
+                    f:write(content)
+                    f:close()
+                    os.rename(tmp, dest)
+                    extracted = extracted + 1
+                else
+                    failed[#failed+1] = rel .. " (write: " .. tostring(ferr) .. ")"
+                end
             else
-                failed[#failed+1] = fname .. " (write error)"
+                failed[#failed+1] = rel .. " (extract: " .. tostring(reader.err) .. ")"
             end
-        else
-            failed[#failed+1] = fname .. " (" .. (err or "?") .. ")"
         end
     end
+    reader:close()
+    os.remove(zip_path)
 
     UIManager:close(progress)
 
-    if #failed > 0 then
+    if extracted == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("Update failed: archive contained no plugin files."),
+        })
+    elseif #failed > 0 then
         UIManager:show(InfoMessage:new{
             text = string.format(
-                _("Update partially failed.\nCould not download:\n%s"),
+                _("Update partially failed.\nCould not write:\n%s"),
                 table.concat(failed, "\n")),
         })
     else
