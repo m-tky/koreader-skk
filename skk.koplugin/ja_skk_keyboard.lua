@@ -666,44 +666,67 @@ q → toggle hiragana/katakana; l → ASCII mode
 
     wrapInputBox = wrapInputBox,
 
-    keys = {
-        genFirstRow(),
-        -- Row 2 (Layer1=⇧, Layer2=Normal, Layer3=⇧+⌥, Layer4=⌥)
-        {
-            {"Q","q","!","1"},{"W","w","？","2"},{"E","e","、","3"},
-            {"R","r","。","4"},{"T","t","「","5"},{"Y","y","」","6"},
-            {"U","u","・","7"},{"I","i","…","8"},{"O","o","〜","9"},{"P","p","〇","0"},
-        },
-        -- Row 3
-        {
-            {"A","a","＠","@"},{"S","s","＃","#"},{"D","d","＄","$"},
-            {"F","f","％","%"},{"G","g","＾","^"},{"H","h","＆","&"},
-            {"J","j","＊","*"},{"K","k","（","("},{"L","l","）",")"},
-            {".",":","：","。"},
-        },
-        -- Row 4
-        {
+    -- Row layer model: { ⇧, Normal, ⇧+⌥, ⌥ }
+    -- In ASCII mode (A), layer 3 (⇧+⌥) is rebuilt with half-width symbols so
+    -- the keyboard produces 1-byte ASCII punctuation consistent with the
+    -- mode label. The numeric row (row 2) layer 3 follows US shift-number
+    -- convention (!@#$%^&*()). rebuildKeyboard re-evaluates this whole keys
+    -- table on every mode cycle, so reading S.mode at module load time is
+    -- correct.
+    keys = (function()
+        local ascii = S.mode == "ascii"
+        local row2_layer3 = ascii
+            and {"!","@","#","$","%","^","&","*","(",")"}
+            or  {"!","？","、","。","「","」","・","…","〜","〇"}
+        local row3_layer3 = ascii
+            and {"@","#","$","%","^","&","*","(",")",":"}
+            or  {"＠","＃","＄","％","＾","＆","＊","（","）","："}
+        local row4_layer3 = ascii
+            and {"-","_","+","=","/","\\",","}
+            or  {"ー","＿","＋","＝","／","￥","、"}
+        -- Row 5 column 5: punctuation key next to space.
+        local row5_punc = ascii
+            and {".",",",".",","}
+            or  {".",",","、","。"}
+
+        local row2_keys = {
+            {"Q","q",row2_layer3[1],"1"},{"W","w",row2_layer3[2],"2"},
+            {"E","e",row2_layer3[3],"3"},{"R","r",row2_layer3[4],"4"},
+            {"T","t",row2_layer3[5],"5"},{"Y","y",row2_layer3[6],"6"},
+            {"U","u",row2_layer3[7],"7"},{"I","i",row2_layer3[8],"8"},
+            {"O","o",row2_layer3[9],"9"},{"P","p",row2_layer3[10],"0"},
+        }
+        local row3_keys = {
+            {"A","a",row3_layer3[1],"@"},{"S","s",row3_layer3[2],"#"},
+            {"D","d",row3_layer3[3],"$"},{"F","f",row3_layer3[4],"%"},
+            {"G","g",row3_layer3[5],"^"},{"H","h",row3_layer3[6],"&"},
+            {"J","j",row3_layer3[7],"*"},{"K","k",row3_layer3[8],"("},
+            {"L","l",row3_layer3[9],")"},
+            {".",":",row3_layer3[10], ascii and "." or "。"},
+        }
+        local row4_keys = {
             -- Empty-string key fields make VirtualKey treat shift as releasable
             -- (releasable = key == ""), so a single tap behaves like upstream:
             -- one-shot for normal letters, capslock on long-press.
             {"","","","", label="⇧", width=1.5},
-            {"Z","z","ー","-"},{"X","x","＿","_"},{"C","c","＋","+"},
-            {"V","v","＝","="},{"B","b","／","/"},{"N","n","￥","\\"},
-            {"M","m","、",","},
+            {"Z","z",row4_layer3[1],"-"},{"X","x",row4_layer3[2],"_"},
+            {"C","c",row4_layer3[3],"+"},{"V","v",row4_layer3[4],"="},
+            {"B","b",row4_layer3[5],"/"},{"N","n",row4_layer3[6],"\\"},
+            {"M","m",row4_layer3[7],","},
             {label="\238\157\173", width=1.5},
-        },
-        -- Row 5
-        {
+        }
+        local row5_keys = {
             {label="⌥", bold=true, width=1.5},
             {label="🌐"},
             {SKK_MODE,SKK_MODE,SKK_MODE,SKK_MODE,
              label=S.mode=="kana" and "あ" or S.mode=="katakana" and "ア" or "A",
              bold=true},
             {" "," "," "," ", label="_", width=2.0},
-            {".",",","、","。"},
+            row5_punc,
             {label="←"},
             {label="→"},
             {label="\226\174\160", "\n","\n","\n","\n", bold=true, width=1.5},
-        },
-    },
+        }
+        return { genFirstRow(), row2_keys, row3_keys, row4_keys, row5_keys }
+    end)(),
 }
