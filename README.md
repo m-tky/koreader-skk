@@ -31,12 +31,13 @@ Works on **all KOReader platforms**:
 
 1. Copy the `skk.koplugin/` folder into your KOReader `plugins/` directory.
 2. Start KOReader.
-3. Open **Menu → Tools → SKK Japanese Input → Enable SKK**.
-4. For the touch virtual keyboard, open any text field and tap the **🌐** globe
+3. For the touch virtual keyboard, open any text field and tap the **🌐** globe
    key; select **日本語 SKK** from the layout list.
 
-The plugin registers the SKK keyboard layout automatically on first load, so the
-🌐 menu entry appears without restarting KOReader.
+The plugin is active as soon as it loads. Physical-keyboard typing in any input
+field uses SKK conversion automatically; `Ctrl+\` toggles SKK on/off per field,
+and `l` switches to ASCII mode within SKK. On touch devices, choosing a non-SKK
+layout from the 🌐 menu falls back to plain input.
 
 > **First run**: the bundled dictionary is converted to a SQLite database on first
 > use. This takes a few seconds and shows a "変換中…" progress message. Subsequent

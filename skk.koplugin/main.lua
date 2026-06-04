@@ -44,7 +44,6 @@ local RELEASE_ASSET  = "skk.koplugin.zip"
 local SKK = WidgetContainer:extend{
     name = "skk",
     is_doc_only = false,
-    _enabled = false,
     _orig_inputtext_class = nil,
 }
 
@@ -61,11 +60,8 @@ function SKK:init()
         G_reader_settings:saveSetting("virtual_keyboard_enabled", true)
         logger.info("SKK: auto-enabled virtual keyboard for SDL emulator")
     end
-    self._enabled = G_reader_settings:isTrue("skk_enabled")
-    if self._enabled then
-        self:_activate()
-        UIManager:nextTick(function() Dict.ensureDB() end)
-    end
+    self:_activate()
+    UIManager:nextTick(function() Dict.ensureDB() end)
 end
 
 -- Register the SKK keyboard layout with VirtualKeyboard and Language
@@ -128,26 +124,6 @@ function SKK:addToMainMenu(menu_items)
     menu_items.skk = {
         text = _("SKK Japanese Input"),
         sub_item_table = {
-            {
-                text = _("Enable SKK"),
-                checked_func = function() return self._enabled end,
-                callback = function()
-                    self._enabled = not self._enabled
-                    G_reader_settings:saveSetting("skk_enabled", self._enabled)
-                    if self._enabled then
-                        self:_activate()
-                        Dict.ensureDB()
-                        UIManager:show(InfoMessage:new{
-                            text = _("SKK enabled.\n"..
-                                     "Ctrl+\\ toggles SKK per field.\n"..
-                                     "Shift+letter → kanji conversion."),
-                            timeout = 3,
-                        })
-                    else
-                        self:_deactivate()
-                    end
-                end,
-            },
             {
                 text = _("Dictionaries"),
                 callback = function() self:_showDictMenu() end,
