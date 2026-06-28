@@ -17,6 +17,11 @@ Works on **all KOReader platforms**:
 | Kindle, Android, PocketBook (touch only) | Virtual keyboard (🌐 → 日本語 SKK) |
 | SDL emulator / devices with a physical keyboard | Physical keys via SKKInputText |
 
+Related: [koreader-tategumi](https://github.com/m-tky/koreader-tategumi) is a
+KOReader fork with Japanese vertical text (縦書き) rendering support.
+It can be used together with this plugin for a more complete Japanese reading and
+text-input setup.
+
 ---
 
 ## Features
