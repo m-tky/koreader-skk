@@ -36,16 +36,22 @@ local toKatakana   = Romaji.toKatakana
 -- ----------------------------------------------------------------
 local SKK_MODE = "SKK_MODE"
 
+-- Non-letter suffixes recognised by SKK's z punctuation sequences.
+-- Everything else that is not a lowercase ASCII letter is committed as a
+-- literal immediately, keeping input behaviour in sync with the layout.
+local Z_SYMBOL_SUFFIXES = {
+    [","]=true, ["."]=true, ["/"]=true, ["-"]=true,
+    ["["]=true, ["]"]=true, ["("]=true, [")"]=true,
+}
+
 -- ----------------------------------------------------------------
 -- Persistent global state
 -- ----------------------------------------------------------------
 _G._skk_vkbd_state = _G._skk_vkbd_state or {}
 local S = _G._skk_vkbd_state
-S.cands    = S.cands    or {}
 S.page     = S.page     or 1
 S.mode     = S.mode     or "kana"
 S.ib       = S.ib       or nil
-S.select   = S.select   or false   -- true while in SELECT mode
 S.bar      = S.bar      or nil     -- SKKCandidateBar widget (survives rebuildKeyboard)
 
 local CANDS_PER_PAGE = Dict.PAGE_SIZE
@@ -58,7 +64,7 @@ local function rebuildKeyboard()
     if not (ib and ib.keyboard) then return end
     UIManager:nextTick(function()
         -- Clear both the VirtualKeyboard require path and the plugin module so
-        -- genFirstRow() is re-evaluated with the current S.select / S.mode state.
+        -- the mode label and mode-specific punctuation are re-evaluated.
         package.loaded["ui/data/keyboardlayouts/ja_skk_keyboard"] = nil
         package.loaded["ja_skk_keyboard"] = nil
         ib.keyboard:setKeyboardLayout("js")
@@ -66,30 +72,17 @@ local function rebuildKeyboard()
 end
 
 -- ----------------------------------------------------------------
--- Row 1 generator:
---   SELECT mode → number keys "1"–"9" for direct candidate selection
---   normal mode → mode indicator + Japanese punctuation
+-- Always-visible number row. Candidate selection uses the same 1–9 keys, so
+-- entering SELECT mode does not need a keyboard rebuild.
 -- ----------------------------------------------------------------
 local function genFirstRow()
-    if S.select then
-        -- Number keys for candidate selection
-        return {
-            {"1","1","1","1"}, {"2","2","2","2"}, {"3","3","3","3"},
-            {"4","4","4","4"}, {"5","5","5","5"}, {"6","6","6","6"},
-            {"7","7","7","7"}, {"8","8","8","8"}, {"9","9","9","9"},
-            {"x","x","x","x", label="✕"},   -- cancel selection
-        }
-    else
-        -- Mode cycling (あ→ア→A) lives on row 5 next to the space bar; the
-        -- top-left slot used to duplicate that, so it's been reclaimed for a
-        -- frequently-used punctuation mark instead.
-        return {
-            {"…","…","…","…"},
-            {"、","、","、","、"}, {"。","。","。","。"}, {"・","・","・","・"},
-            {"「","「","「","「"}, {"」","」","」","」"}, {"ー","ー","ー","ー"},
-            {"〜","〜","〜","〜"}, {"？","？","？","？"}, {"！","！","！","！"},
-        }
-    end
+    return {
+        {"!","1","！","、"}, {"@","2","＠","。"},
+        {"#","3","＃","ー"}, {"$","4","＄","・"},
+        {"%","5","％","「"}, {"^","6","＾","」"},
+        {"&","7","＆","？"}, {"*","8","＊","！"},
+        {"(","9","（","〜"}, {")","0","）","…"},
+    }
 end
 
 -- ----------------------------------------------------------------
@@ -105,13 +98,6 @@ local function wrapInputBox(inputbox)
 
     if inputbox._skk_vkbd_wrapped then
         logger.info("SKK vkbd: already wrapped, skipping re-install")
-        -- Restore select-mode row if rebuilding mid-composition
-        if inputbox._skk_state == "select" then
-            S.select = true
-            if inputbox._skk_cands and #S.cands == 0 then
-                S.cands = inputbox._skk_cands
-            end
-        end
         return
     end
     logger.info("SKK vkbd: installing wrappers, mode=", S.mode)
@@ -127,13 +113,6 @@ local function wrapInputBox(inputbox)
     inputbox._skk_okuri_kana   = inputbox._skk_okuri_kana   or ""
     if inputbox._skk_hint_len == nil then inputbox._skk_hint_len = 0 end
     if inputbox._skk_cand_idx == nil then inputbox._skk_cand_idx = 1 end
-    if inputbox._skk_state == "select" then
-        S.select = true
-        if inputbox._skk_cands and #S.cands == 0 then
-            S.cands = inputbox._skk_cands
-        end
-    end
-
     Dict.ensureDB()
 
     -- ---- Helpers -----------------------------------------------
@@ -217,7 +196,6 @@ local function wrapInputBox(inputbox)
     end
 
     local function enterSelectMode(ib)
-        S.select = true
         -- Prevent InputDialog from closing the keyboard when the user taps the
         -- candidate bar above it (InputDialog treats any tap outside the
         -- keyboard frame as a dismiss gesture).
@@ -226,8 +204,6 @@ local function wrapInputBox(inputbox)
     end
 
     local function exitSelectMode(ib)
-        S.select = false
-        S.cands  = {}
         S.page   = 1
         if ib.parent then ib.parent.deny_keyboard_hiding = false end
         hideCandBar()
@@ -256,7 +232,6 @@ local function wrapInputBox(inputbox)
         ib._skk_okuri_active  = false
         ib._skk_okuri_kana    = ""
         exitSelectMode(ib)
-        rebuildKeyboard()  -- restore row 1 to punctuation
         local committed_text = (text or "") .. okuri_kana
         if committed_text ~= "" then ib.addChars:raw_method_call(committed_text) end
         if saved_buf ~= "" then
@@ -280,7 +255,6 @@ local function wrapInputBox(inputbox)
         ib._skk_okuri_active  = false
         ib._skk_okuri_kana    = ""
         exitSelectMode(ib)
-        rebuildKeyboard()
     end
 
     refreshPreedit = function(ib)
@@ -372,7 +346,6 @@ local function wrapInputBox(inputbox)
         ib._skk_cands    = cands
         ib._skk_cand_idx = 1
         ib._skk_state    = "select"
-        S.cands = cands
         S.page  = 1
         refreshPreedit(ib)
         enterSelectMode(ib)
@@ -398,6 +371,23 @@ local function wrapInputBox(inputbox)
         ib._skk_romaji_buf = new_buf
         if committed and committed ~= "" then ib._skk_reading = ib._skk_reading..committed end
         refreshPreedit(ib)
+    end
+
+    local function commitDirectLiteral(ib, char)
+        local flushed = flushRomaji(ib._skk_romaji_buf)
+        ib._skk_romaji_buf = ""
+        delHint(ib)
+        if flushed ~= "" then
+            local out = ib._skk_mode == "katakana" and toKatakana(flushed) or flushed
+            ib.addChars:raw_method_call(out)
+        end
+        ib.addChars:raw_method_call(char)
+    end
+
+    local function isRomajiInput(buf, char)
+        if #char == 1 and char:match("[a-z]") then return true end
+        if buf == "n" and char == "'" then return true end
+        return buf == "z" and Z_SYMBOL_SUFFIXES[char] == true
     end
 
     -- ---- wrappedAddChars ---------------------------------------
@@ -463,7 +453,6 @@ local function wrapInputBox(inputbox)
                 ib._skk_okuri_active  = false
                 ib._skk_okuri_kana    = ""
                 exitSelectMode(ib)
-                rebuildKeyboard()
                 if kata ~= "" then ib.addChars:raw_method_call(kata) end
                 return
             end
@@ -524,7 +513,7 @@ local function wrapInputBox(inputbox)
                     if #cands == 0 then cands = Dict.lookup(reading) end
                     if #cands > 0 then
                         ib._skk_cands=cands; ib._skk_cand_idx=1
-                        ib._skk_state="select"; S.cands=cands; S.page=1
+                        ib._skk_state="select"; S.page=1
                         ib._skk_okuri_active = true
                         ib._skk_okuri_kana   = ""
                         refreshPreedit(ib); enterSelectMode(ib); return
@@ -543,6 +532,9 @@ local function wrapInputBox(inputbox)
             return
         end
         if char==" " then
+            if ib._skk_romaji_buf == "z" then
+                processRomajiDirect(ib, char); return
+            end
             local flushed=flushRomaji(ib._skk_romaji_buf)
             ib._skk_romaji_buf=""; delHint(ib)
             if flushed~="" then
@@ -557,7 +549,9 @@ local function wrapInputBox(inputbox)
             ib._skk_mode=ib._skk_mode=="katakana" and "kana" or "katakana"
             S.mode=ib._skk_mode; rebuildKeyboard(); return
         end
-        if char=="l" then
+        -- Keep SKK's `zl` → right-arrow sequence reachable; bare `l` still
+        -- switches to ASCII mode as usual.
+        if char=="l" and ib._skk_romaji_buf ~= "z" then
             local flushed=flushRomaji(ib._skk_romaji_buf)
             ib._skk_romaji_buf=""; delHint(ib)
             if flushed~="" then ib.addChars:raw_method_call(flushed) end
@@ -569,6 +563,11 @@ local function wrapInputBox(inputbox)
             if flushed~="" then
                 ib.addChars:raw_method_call(ib._skk_mode=="katakana" and toKatakana(flushed) or flushed) end
             ib.addChars:raw_method_call("\n"); return
+        end
+        -- Only lowercase letters and SKK's n'/z-prefixed sequences belong in
+        -- the romaji DFA. Everything else is literal and commits immediately.
+        if not isRomajiInput(ib._skk_romaji_buf, char) then
+            commitDirectLiteral(ib, char); return
         end
         processRomajiDirect(ib, char)
     end
@@ -651,8 +650,7 @@ return {
             {
                 text = _("SKK input — key bindings"),
                 help_text = _([[
-Row 1 (normal): mode key (あ/ア/A) + Japanese punctuation
-Row 1 (SELECT): 1–9 number keys for direct candidate selection
+Number row: 1–0 normally; 1–9 select candidates in SELECT
 
 Shift layer → kanji conversion ▽
 Space → convert/next candidate; Enter → commit
@@ -666,53 +664,46 @@ q → toggle hiragana/katakana; l → ASCII mode
 
     wrapInputBox = wrapInputBox,
 
-    -- Row layer model: { ⇧, Normal, ⇧+⌥, ⌥ }
-    -- In ASCII mode (A), layer 3 (⇧+⌥) is rebuilt with half-width symbols so
-    -- the keyboard produces 1-byte ASCII punctuation consistent with the
-    -- mode label. The numeric row (row 2) layer 3 follows US shift-number
-    -- convention (!@#$%^&*()). rebuildKeyboard re-evaluates this whole keys
-    -- table on every mode cycle, so reading S.mode at module load time is
-    -- correct.
+    -- Row layer model: { ⇧, Normal, ⇧+⌥, ⌥ }.
+    -- Normal/Shift follow QWERTY. ⌥ contains frequent Japanese and ASCII
+    -- punctuation without duplicates; ⇧+⌥ contains full-width/rare symbols.
     keys = (function()
         local ascii = S.mode == "ascii"
-        local row2_layer3 = ascii
-            and {"!","@","#","$","%","^","&","*","(",")"}
-            or  {"!","？","、","。","「","」","・","…","〜","〇"}
-        local row3_layer3 = ascii
-            and {"@","#","$","%","^","&","*","(",")",":"}
-            or  {"＠","＃","＄","％","＾","＆","＊","（","）","："}
-        local row4_layer3 = ascii
-            and {"-","_","+","=","/","\\",","}
-            or  {"ー","＿","＋","＝","／","￥","、"}
+        local row2_layer3 = {"１","２","３","４","５","６","７","８","９","０"}
+        local row3_layer3 = {"－","＿","＋","＝","／","￥","：","；","，","．"}
+        local row4_layer3 = {"々","〆","〒","※","☆","★","゜"}
+        local row2_symbol = {"-","_","+","=","/","\\","'","\"","<",">"}
+        local row3_symbol = {"『","』","【","】","（","）","［","］","〈","〉"}
+        local row4_symbol = {"~","`","|","{","}","[","]"}
         -- Row 5 column 5: punctuation key next to space.
         local row5_punc = ascii
-            and {".",",",".",","}
-            or  {".",",","、","。"}
+            and {",",".","゛","?"}
+            or  {"、","。","゛","?"}
 
         local row2_keys = {
-            {"Q","q",row2_layer3[1],"1"},{"W","w",row2_layer3[2],"2"},
-            {"E","e",row2_layer3[3],"3"},{"R","r",row2_layer3[4],"4"},
-            {"T","t",row2_layer3[5],"5"},{"Y","y",row2_layer3[6],"6"},
-            {"U","u",row2_layer3[7],"7"},{"I","i",row2_layer3[8],"8"},
-            {"O","o",row2_layer3[9],"9"},{"P","p",row2_layer3[10],"0"},
+            {"Q","q",row2_layer3[1],row2_symbol[1]},{"W","w",row2_layer3[2],row2_symbol[2]},
+            {"E","e",row2_layer3[3],row2_symbol[3]},{"R","r",row2_layer3[4],row2_symbol[4]},
+            {"T","t",row2_layer3[5],row2_symbol[5]},{"Y","y",row2_layer3[6],row2_symbol[6]},
+            {"U","u",row2_layer3[7],row2_symbol[7]},{"I","i",row2_layer3[8],row2_symbol[8]},
+            {"O","o",row2_layer3[9],row2_symbol[9]},{"P","p",row2_layer3[10],row2_symbol[10]},
         }
         local row3_keys = {
-            {"A","a",row3_layer3[1],"@"},{"S","s",row3_layer3[2],"#"},
-            {"D","d",row3_layer3[3],"$"},{"F","f",row3_layer3[4],"%"},
-            {"G","g",row3_layer3[5],"^"},{"H","h",row3_layer3[6],"&"},
-            {"J","j",row3_layer3[7],"*"},{"K","k",row3_layer3[8],"("},
-            {"L","l",row3_layer3[9],")"},
-            {".",":",row3_layer3[10], ascii and "." or "。"},
+            {"A","a",row3_layer3[1],row3_symbol[1]},{"S","s",row3_layer3[2],row3_symbol[2]},
+            {"D","d",row3_layer3[3],row3_symbol[3]},{"F","f",row3_layer3[4],row3_symbol[4]},
+            {"G","g",row3_layer3[5],row3_symbol[5]},{"H","h",row3_layer3[6],row3_symbol[6]},
+            {"J","j",row3_layer3[7],row3_symbol[7]},{"K","k",row3_layer3[8],row3_symbol[8]},
+            {"L","l",row3_layer3[9],row3_symbol[9]},
+            {":",";",row3_layer3[10],row3_symbol[10]},
         }
         local row4_keys = {
             -- Empty-string key fields make VirtualKey treat shift as releasable
             -- (releasable = key == ""), so a single tap behaves like upstream:
             -- one-shot for normal letters, capslock on long-press.
             {"","","","", label="⇧", width=1.5},
-            {"Z","z",row4_layer3[1],"-"},{"X","x",row4_layer3[2],"_"},
-            {"C","c",row4_layer3[3],"+"},{"V","v",row4_layer3[4],"="},
-            {"B","b",row4_layer3[5],"/"},{"N","n",row4_layer3[6],"\\"},
-            {"M","m",row4_layer3[7],","},
+            {"Z","z",row4_layer3[1],row4_symbol[1]},{"X","x",row4_layer3[2],row4_symbol[2]},
+            {"C","c",row4_layer3[3],row4_symbol[3]},{"V","v",row4_layer3[4],row4_symbol[4]},
+            {"B","b",row4_layer3[5],row4_symbol[5]},{"N","n",row4_layer3[6],row4_symbol[6]},
+            {"M","m",row4_layer3[7],row4_symbol[7]},
             {label="\238\157\173", width=1.5},
         }
         local row5_keys = {

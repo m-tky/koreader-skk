@@ -83,18 +83,20 @@ is automatically shown so you can see the current mode.
 
 ## Virtual keyboard (touch)
 
-The SKK keyboard has 5 rows. Row 1 adapts to the current state:
+The SKK keyboard has 5 rows. The number row never changes:
 
-- **Normal mode** — mode indicator (あ / ア / A) + Japanese punctuation
-- **SELECT mode** — number keys 1–9 for direct candidate selection
+- **Normal mode** — type `1`–`0` directly
+- **SELECT mode** — `1`–`9` select candidates directly; `x` or Backspace cancels
 
 ### Layer layout
 
 | Key | Normal (no modifier) | ⇧ (Shift) | ⌥ (Symbol) | ⇧+⌥ |
 |---|---|---|---|---|
-| Q row | q … p | Q … P | 1 … 0 | ! ？ … 〇 |
-| A row | a … : | A … : | @ … 。 | ＠ … ： |
-| Z row | z … , | Z … , | - … , | ー … 、 |
+| Number row | 1 … 0 | ! … ) | 、 。 ー ・ 「 」 ？ ！ 〜 … | ！ … ） |
+| Q row | q … p | Q … P | - _ + = / \ ' " < > | １ … ０ |
+| A row | a … ; | A … : | 『 』 【 】 （ ） ［ ］ 〈 〉 | － … ． |
+| Z row | z … m | Z … M | ~ ` \| { } [ ] | 々 〆 〒 ※ ☆ ★ ゜ |
+| Punctuation | 。 (A mode: .) | 、 (A mode: ,) | ? | ゛ |
 
 ### Converting to kanji
 
@@ -103,7 +105,7 @@ The SKK keyboard has 5 rows. Row 1 adapts to the current state:
 3. Tap **Space** — the first candidate appears as inline preedit:
    `▼漢字 [2:幹事 3:監事…]`
 4. Continue tapping **Space** to cycle, or tap a **number key** to select directly.
-5. Tap **Enter** to commit, or **✕** (or Backspace) to cancel.
+5. Tap **Enter** to commit, or tap **x** (or Backspace) to cancel.
 
 If no candidates are found, a registration dialog appears so you can add the word
 to your user dictionary.
